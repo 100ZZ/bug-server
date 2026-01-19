@@ -1,0 +1,54 @@
+FROM 100zz/test-node:22-alpine
+
+# 接收构建参数：npm registry
+ARG NPM_REGISTRY=""
+ARG YARN_REGISTRY=""
+
+# 设置环境变量，减少 npm 输出和错误
+ENV NODE_ENV=development
+ENV NPM_CONFIG_LOGLEVEL=silent
+ENV NPM_CONFIG_PROGRESS=false
+ENV NPM_CONFIG_FUND=false
+ENV NPM_CONFIG_AUDIT=false
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+
+WORKDIR /app
+
+# 配置 npm/yarn registry（如果提供了）
+RUN if [ -n "$NPM_REGISTRY" ]; then \
+        echo "Configuring npm registry: $NPM_REGISTRY"; \
+        npm config set registry "$NPM_REGISTRY"; \
+    fi && \
+    if [ -n "$YARN_REGISTRY" ]; then \
+        echo "Configuring yarn registry: $YARN_REGISTRY"; \
+        yarn config set registry "$YARN_REGISTRY"; \
+    elif [ -n "$NPM_REGISTRY" ]; then \
+        echo "Using npm registry for yarn: $NPM_REGISTRY"; \
+        yarn config set registry "$NPM_REGISTRY"; \
+    fi
+
+# 复制 package 文件
+COPY frontend/package*.json ./
+
+# 安装 yarn（如果不存在）
+RUN apk add --no-cache yarn || true
+
+# 安装依赖 - 优先使用 yarn，如果失败则回退到 npm
+RUN yarn install --network-timeout 300000 || { \
+        echo "yarn failed, falling back to npm..."; \
+        npm install --legacy-peer-deps --no-optional --network-timeout=300000 || { \
+            rm -rf node_modules package-lock.json ~/.npm; \
+            npm cache clean --force 2>&1 || true; \
+            npm install --legacy-peer-deps --no-optional --network-timeout=300000; \
+        }; \
+    }
+
+# 复制应用代码
+COPY frontend/ .
+
+# 暴露端口
+EXPOSE 11234
+
+# 启动开发服务器（优先使用 yarn，如果不存在则使用 npm）
+CMD ["sh", "-c", "if command -v yarn >/dev/null 2>&1 && [ -f yarn.lock ]; then yarn dev --host 0.0.0.0; else npm run dev -- --host 0.0.0.0; fi"]
+
