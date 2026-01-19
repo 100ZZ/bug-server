@@ -1,4 +1,13 @@
-# 缺陷管理系统
+### 本地执行：
+- ✅ sh start_all.sh
+- ✅ ps：前后端的npm install和venv可以前置操作
+### 容器部署：
+- ✅ cd docker
+- ✅ sh start.sh
+<img width="3828" height="1848" alt="image" src="https://github.com/user-attachments/assets/f4d5b6e0-6a56-4b4a-bf3e-ec7f6d5b52b9" />
+
+
+# 质量管理系统
 
 基于 Vue3 + Element Plus + FastAPI + MySQL 8 的现代化缺陷管理平台，参考 Jira 设计。
 
