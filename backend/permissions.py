@@ -12,7 +12,7 @@ PERMISSIONS = {
         'comments': ['read', 'create', 'update', 'delete'],
         'statistics': ['read'],
         'models': ['read', 'create', 'update', 'delete'],
-        'apitest': ['read', 'create', 'update', 'delete', 'execute']  # admin拥有所有apitest权限
+        'apitest': ['read', 'create', 'update', 'delete', 'execute', 'write']  # admin拥有所有apitest权限
     },
     'product': {
         'projects': ['read'],  # 只有管理员可以创建、更新、删除项目
@@ -22,7 +22,7 @@ PERMISSIONS = {
         'comments': ['read', 'create', 'update', 'delete'],
         'statistics': ['read'],
         'models': ['read'],
-        'apitest': ['read', 'create', 'update', 'delete', 'execute']
+        'apitest': ['read', 'create', 'update', 'delete', 'execute', 'write']
     },
     'developer': {
         'projects': ['read'],  # 只有管理员可以创建、更新、删除项目
@@ -32,7 +32,7 @@ PERMISSIONS = {
         'comments': ['read', 'create', 'update', 'delete'],
         'statistics': ['read'],
         'models': ['read'],
-        'apitest': ['read', 'create', 'update', 'delete', 'execute']
+        'apitest': ['read', 'create', 'update', 'delete', 'execute', 'write']
     },
     'tester': {
         'projects': ['read'],  # 只有管理员可以创建、更新、删除项目
@@ -42,7 +42,7 @@ PERMISSIONS = {
         'comments': ['read', 'create', 'update', 'delete'],
         'statistics': ['read'],
         'models': ['read'],
-        'apitest': ['read', 'create', 'update', 'delete', 'execute']
+        'apitest': ['read', 'create', 'update', 'delete', 'execute', 'write']
     },
     'guest': {
         'projects': ['read'],  # 游客只能查看

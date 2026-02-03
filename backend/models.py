@@ -208,22 +208,20 @@ class CodeScan(Base):
     sonar_login = Column(String(200))  # Sonar的login token
     scan_time = Column(DateTime)  # 扫描时间
     result = Column(String(20))  # 扫描结果：passed/failed
+    error_message = Column(Text)  # 扫描不通过的原因或错误信息
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
     project = relationship("Project", backref="code_scans")
 
 class CodeScanResult(Base):
-    """代码扫描结果"""
+    """代码扫描结果（简化版，仅记录扫描状态）"""
     __tablename__ = "code_scan_results"
     
     id = Column(Integer, primary_key=True, index=True)
     scan_id = Column(Integer, ForeignKey("code_scans.id", ondelete="CASCADE"), nullable=False, index=True)
-    issues = Column(JSON)  # 问题列表
-    metrics = Column(JSON)  # 扫描指标
-    status = Column(String(20), default='running')  # 状态：running/completed/failed
+    status = Column(String(20), default='pending')  # 状态：pending/completed/failed
     error_message = Column(Text)  # 错误信息
-    scan_output = Column(Text)  # 扫描过程的终端输出
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     
@@ -405,6 +403,28 @@ class FlowExportRecord(Base):
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     flow = relationship("ApiTestFlow", backref="export_records")
+
+
+class TestFile(Base):
+    """测试文件管理"""
+    __tablename__ = "test_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)  # 文件名称
+    description = Column(Text)  # 描述
+    file_type = Column(String(50), nullable=False, default='local')  # 类型：flow（流程导出）、local（本地上传）
+    file_name = Column(String(255), nullable=False)  # 实际文件名
+    file_path = Column(String(500))  # 文件存储路径（本地上传时使用）
+    file_content = Column(JSON)  # 文件内容（流程导出时使用JSON存储）
+    file_size = Column(Integer)  # 文件大小（字节）
+    mime_type = Column(String(100))  # MIME类型
+    flow_id = Column(Integer, ForeignKey("api_test_flows.id", ondelete="SET NULL"), nullable=True, index=True)  # 关联的流程ID（如果是流程导出）
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)  # 创建人
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    flow = relationship("ApiTestFlow", backref="test_files")
+    creator = relationship("User", backref="test_files")
 
 
 class UserSession(Base):

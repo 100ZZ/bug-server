@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS api_environments (
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     INDEX idx_project (project_id),
     INDEX idx_name (name),
-    UNIQUE KEY uk_base_url (base_url)
+    UNIQUE KEY uk_project_base_url (project_id, base_url)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='接口测试环境表';
 
 -- 接口端点表
@@ -342,6 +342,29 @@ CREATE TABLE IF NOT EXISTS flow_export_records (
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='流程导出记录表';
 
+-- 测试文件管理表
+CREATE TABLE IF NOT EXISTS test_files (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL COMMENT '文件名称',
+    description TEXT COMMENT '描述',
+    file_type VARCHAR(50) NOT NULL DEFAULT 'local' COMMENT '类型：flow（流程导出）、local（本地上传）',
+    file_name VARCHAR(255) NOT NULL COMMENT '实际文件名',
+    file_path VARCHAR(500) COMMENT '文件存储路径（本地上传时使用）',
+    file_content JSON COMMENT '文件内容（流程导出时使用JSON存储）',
+    file_size INT COMMENT '文件大小（字节）',
+    mime_type VARCHAR(100) COMMENT 'MIME类型',
+    flow_id INT COMMENT '关联的流程ID（如果是流程导出）',
+    created_by INT COMMENT '创建人ID',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    FOREIGN KEY (flow_id) REFERENCES api_test_flows(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_file_type (file_type),
+    INDEX idx_flow_id (flow_id),
+    INDEX idx_created_by (created_by),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试文件管理表';
+
 -- 用户会话表
 CREATE TABLE IF NOT EXISTS user_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -373,6 +396,7 @@ CREATE TABLE IF NOT EXISTS code_scans (
     sonar_login VARCHAR(200) COMMENT 'Sonar的login token',
     scan_time TIMESTAMP NULL COMMENT '扫描时间',
     result VARCHAR(20) COMMENT '扫描结果：passed/failed',
+    error_message TEXT COMMENT '扫描不通过的原因或错误信息',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -380,15 +404,12 @@ CREATE TABLE IF NOT EXISTS code_scans (
     INDEX idx_result (result)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='代码扫描任务表';
 
--- 代码扫描结果表
+-- 代码扫描结果表（简化版，仅记录扫描状态，详细结果请查看Sonar页面）
 CREATE TABLE IF NOT EXISTS code_scan_results (
     id INT AUTO_INCREMENT PRIMARY KEY,
     scan_id INT NOT NULL COMMENT '关联扫描任务ID',
-    issues JSON COMMENT '问题列表',
-    metrics JSON COMMENT '扫描指标',
-    status VARCHAR(20) DEFAULT 'running' COMMENT '状态：running/completed/failed',
+    status VARCHAR(20) DEFAULT 'pending' COMMENT '状态：pending/completed/failed',
     error_message TEXT COMMENT '错误信息',
-    scan_output TEXT COMMENT '扫描过程的终端输出',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (scan_id) REFERENCES code_scans(id) ON DELETE CASCADE,

@@ -195,10 +195,13 @@
           </div>
         </el-form-item>
         <el-form-item label="任务项">
-          <div style="margin-bottom: 10px;">
+          <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; width: 100%;">
             <el-button size="small" @click="showAddItemDialog">添加接口/流程</el-button>
+            <span v-if="formData.items && formData.items.length > 0" style="font-size: 12px; color: #909399;">
+              共 {{ formData.items.length }} 项
+            </span>
           </div>
-          <el-table :data="formData.items" border style="width: 100%">
+          <el-table :data="paginatedFormItems" border style="width: 100%">
             <el-table-column label="类型" width="100" align="center">
               <template #default="{ row }">
                 <el-tag :type="row.item_type === 'api' ? 'primary' : 'success'" size="small">
@@ -212,11 +215,20 @@
               </template>
             </el-table-column>
             <el-table-column label="操作" width="100" align="center">
-              <template #default="{ row, $index }">
-                <el-button link type="danger" size="small" @click="removeItem($index)">删除</el-button>
+              <template #default="{ row }">
+                <el-button link type="danger" size="small" class="delete-btn-no-bg" @click="removeItemById(row)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="formData.items && formData.items.length > formItemsPageSize" style="margin-top: 12px; display: flex; justify-content: center;">
+            <el-pagination
+              v-model:current-page="formItemsPage"
+              :page-size="formItemsPageSize"
+              :total="formData.items.length"
+              layout="prev, pager, next"
+              small
+            />
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -235,31 +247,62 @@
       <template #header>
         <div class="dialog-header">
           <span class="dialog-title">添加接口/流程</span>
-          <span class="dialog-description">选择要添加到任务中的接口或流程，可以多选，系统将按添加顺序执行</span>
+          <span class="dialog-description">
+            <template v-if="existingItemType === 'api'">当前任务已添加接口，只能继续添加接口</template>
+            <template v-else-if="existingItemType === 'flow'">当前任务已添加流程，只能继续添加流程</template>
+            <template v-else>选择要添加的接口或流程，一个任务只能添加同一类型</template>
+          </span>
         </div>
       </template>
       <el-tabs v-model="addItemType">
-        <el-tab-pane label="接口" name="api">
+        <el-tab-pane label="接口" name="api" :disabled="!canAddApi">
+          <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+            <el-checkbox 
+              v-model="selectAllApis" 
+              @change="handleSelectAllApis"
+              :indeterminate="isIndeterminateApis"
+            >
+              全选所有接口
+            </el-checkbox>
+            <span style="font-size: 12px; color: #909399;">
+              共 {{ filteredApis.length }} 个接口，已选择 {{ selectedApiIds.length }} 个
+            </span>
+          </div>
+          <div v-if="selectAllApis && filteredApis.length > 0" style="padding: 12px; background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 4px; margin-bottom: 10px; text-align: center; color: #1890ff;">
+            <el-icon style="margin-right: 4px; vertical-align: middle;"><InfoFilled /></el-icon>
+            已全选 {{ filteredApis.length }} 个接口
+          </div>
           <el-select
             v-model="selectedApiIds"
             multiple
             filterable
-            placeholder="搜索或选择接口（支持按方法、路径、名称搜索）"
+            collapse-tags
+            :placeholder="selectAllApis ? `已选择 ${selectedApiIds.length} 个接口` : '搜索或选择接口（支持按方法、路径、名称搜索）'"
             style="width: 100%"
             :filter-method="filterApis"
+            :max-collapse-tags="1"
+            collapse-tags-tooltip
+            popper-class="api-select-dropdown"
           >
             <el-option
-              v-for="api in filteredApis"
+              v-for="api in displayApisLimited"
               :key="api.id"
               :label="`${api.method} ${api.path} - ${api.name}`"
               :value="api.id"
             />
           </el-select>
-          <div style="margin-top: 10px; font-size: 12px; color: #909399;">
-            共 {{ availableApis.length }} 个接口，已选择 {{ selectedApiIds.length }} 个
+          <div v-if="!selectAllApis && filteredApis.length > 10" style="margin-top: 10px; display: flex; justify-content: center;">
+            <el-pagination
+              v-model:current-page="apiPage"
+              :page-size="10"
+              :total="filteredApis.length"
+              layout="prev, pager, next"
+              small
+              @current-change="handleApiPageChange"
+            />
           </div>
         </el-tab-pane>
-        <el-tab-pane label="流程" name="flow">
+        <el-tab-pane label="流程" name="flow" :disabled="!canAddFlow">
           <el-select
             v-model="selectedFlowIds"
             multiple
@@ -291,15 +334,23 @@
     <!-- 任务项列表对话框 -->
     <el-dialog
       v-model="itemsDialogVisible"
-      width="800px"
+      width="900px"
+      align-center
+      :show-close="true"
+      class="items-dialog-centered"
     >
       <template #header>
         <div class="dialog-header">
           <span class="dialog-title">任务项列表</span>
-          <span class="dialog-description">查看任务中包含的所有接口和流程</span>
+          <span class="dialog-description">查看任务中包含的所有接口和流程，按执行顺序排列</span>
         </div>
       </template>
-      <el-table :data="currentTaskItems" border>
+      <el-table :data="paginatedTaskItems" border>
+        <el-table-column label="编号" width="80" align="center">
+          <template #default="{ $index }">
+            {{ (itemsDialogPage - 1) * itemsDialogPageSize + $index + 1 }}
+          </template>
+        </el-table-column>
         <el-table-column label="类型" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.item_type === 'api' ? 'primary' : 'success'" size="small">
@@ -307,7 +358,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="名称" min-width="200">
+        <el-table-column label="名称" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             {{ getItemName(row) }}
           </template>
@@ -318,35 +369,152 @@
           </template>
         </el-table-column>
       </el-table>
+      <div v-if="currentTaskItems.length > 0" style="margin-top: 16px; text-align: right;">
+        <el-pagination
+          v-model:current-page="itemsDialogPage"
+          v-model:page-size="itemsDialogPageSize"
+          :page-sizes="[10]"
+          layout="prev, pager, next, ->, total"
+          :total="currentTaskItems.length"
+          small
+        />
+      </div>
     </el-dialog>
 
     <!-- 执行对话框 -->
     <el-dialog
       v-model="executeDialogVisible"
-      width="500px"
+      width="720px"
+      class="execute-dialog"
     >
       <template #header>
-        <div class="dialog-header">
-          <span class="dialog-title">执行测试任务</span>
-          <span class="dialog-description">选择执行环境，按任务项顺序依次执行接口和流程测试</span>
+        <div class="execute-dialog-header">
+          <div class="execute-dialog-icon">
+            <el-icon :size="24"><VideoPlay /></el-icon>
+          </div>
+          <div class="execute-dialog-title-wrap">
+            <span class="execute-dialog-title">执行测试任务</span>
+            <span class="execute-dialog-desc">选择执行环境，可设置 Header 和断言替换</span>
+          </div>
         </div>
       </template>
-      <el-form :model="executeForm" label-width="100px">
-        <el-form-item label="选择环境" required>
-          <el-select v-model="executeForm.environment_id" placeholder="选择环境" style="width: 100%">
-            <el-option
-              v-for="env in environments"
-              :key="env.id"
-              :label="env.description ? `${env.name} (${env.base_url}) - ${env.description}` : `${env.name} (${env.base_url})`"
-              :value="env.id"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
+      
+      <div class="execute-dialog-content">
+        <!-- 环境选择卡片 -->
+        <div class="execute-section">
+          <div class="execute-section-header">
+            <el-icon class="section-icon" color="#409eff"><Connection /></el-icon>
+            <span class="section-title">执行环境</span>
+            <el-tag type="danger" size="small">必选</el-tag>
+          </div>
+          <div class="execute-section-body">
+            <el-select 
+              v-model="executeForm.environment_id" 
+              placeholder="请选择执行环境" 
+              style="width: 100%"
+              size="large"
+            >
+              <el-option
+                v-for="env in environments"
+                :key="env.id"
+                :label="env.description ? `${env.name} (${env.base_url}) - ${env.description}` : `${env.name} (${env.base_url})`"
+                :value="env.id"
+              />
+            </el-select>
+          </div>
+        </div>
+        
+        <!-- 替换设置卡片 -->
+        <div class="execute-section">
+          <div class="execute-section-header">
+            <el-icon class="section-icon" color="#e6a23c"><Setting /></el-icon>
+            <span class="section-title">替换设置</span>
+            <el-tag type="info" size="small">可选</el-tag>
+          </div>
+          <div class="execute-section-body">
+            <!-- Header 替换 -->
+            <div class="replacement-group">
+              <div class="replacement-group-title">
+                <span>Header 替换</span>
+                <span class="replacement-hint">执行时将替换请求头中的指定 Key</span>
+              </div>
+              <div class="replacement-list">
+                <div v-for="(item, index) in executeForm.header_replacements" :key="'header-' + index" class="replacement-row">
+                  <el-input 
+                    v-model="item.key" 
+                    placeholder="Key"
+                    class="replacement-key-input"
+                  >
+                    <template #prefix>
+                      <el-icon><Key /></el-icon>
+                    </template>
+                  </el-input>
+                  <el-input 
+                    v-model="item.value" 
+                    placeholder="Value"
+                    class="replacement-value-input"
+                  />
+                  <div class="replacement-actions">
+                    <el-button link type="danger" @click="removeHeaderReplacement(index)">删除</el-button>
+                    <el-button link type="primary" @click="addHeaderReplacementAfter(index)">新增</el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Assertion 替换 -->
+            <div class="replacement-group" style="margin-top: 16px;">
+              <div class="replacement-group-title">
+                <span>Assertion 替换</span>
+                <span class="replacement-hint">执行时将使用以下断言替换原有断言</span>
+              </div>
+              <div class="replacement-list">
+                <div v-for="(item, index) in executeForm.assertion_replacements" :key="'assertion-' + index" class="assertion-replacement-row">
+                  <el-select v-model="item.type" placeholder="类型" class="assertion-type-select">
+                    <el-option label="状态码" value="status_code" />
+                    <el-option label="JSON路径" value="json_path" />
+                    <el-option label="响应时间" value="response_time" />
+                    <el-option label="包含" value="contains" />
+                  </el-select>
+                  <el-input 
+                    v-if="item.type === 'json_path'"
+                    v-model="item.target" 
+                    placeholder="路径，如：data.id"
+                    class="assertion-target-input"
+                  />
+                  <el-select v-model="item.operator" placeholder="操作符" class="assertion-operator-select">
+                    <el-option label="等于" value="eq" />
+                    <el-option label="不等于" value="ne" />
+                    <el-option label="大于" value="gt" />
+                    <el-option label="大于等于" value="gte" />
+                    <el-option label="小于" value="lt" />
+                    <el-option label="小于等于" value="lte" />
+                    <el-option label="包含" value="contains" />
+                    <el-option label="不包含" value="not_contains" />
+                  </el-select>
+                  <el-input 
+                    v-model="item.expected" 
+                    placeholder="期望值"
+                    class="replacement-value-input"
+                  />
+                  <div class="replacement-actions">
+                    <el-button link type="danger" @click="removeAssertionReplacement(index)">删除</el-button>
+                    <el-button link type="primary" @click="addAssertionReplacementAfter(index)">新增</el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <template #footer>
-        <div style="display: flex; gap: 10px; justify-content: flex-end;">
-          <el-button @click="executeDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="executing" @click="confirmExecute">开始执行</el-button>
+        <div class="execute-dialog-footer">
+          <el-button @click="executeDialogVisible = false" size="large">取消</el-button>
+          <el-button type="primary" :loading="executing" @click="confirmExecute" size="large">
+            <el-icon v-if="!executing"><VideoPlay /></el-icon>
+            开始执行
+          </el-button>
         </div>
       </template>
     </el-dialog>
@@ -485,7 +653,10 @@
         <div class="execution-detail-header-section">
           <h3>执行详情</h3>
         </div>
-        <div v-if="currentExecution" class="execution-detail-container">
+        <div v-if="executionDetailLoading" class="execution-detail-container" style="display: flex; justify-content: center; align-items: center; min-height: 300px;">
+          <el-icon class="is-loading" :size="40" style="color: #409EFF;"><Loading /></el-icon>
+        </div>
+        <div v-else-if="currentExecution" class="execution-detail-container">
         <el-descriptions :column="2" border style="margin-bottom: 20px;">
           <el-descriptions-item label="执行时间">{{ formatDateTime(currentExecution.started_at) }}</el-descriptions-item>
           <el-descriptions-item label="完成时间">{{ currentExecution.completed_at ? formatDateTime(currentExecution.completed_at) : '-' }}</el-descriptions-item>
@@ -505,9 +676,24 @@
         
         <el-divider>执行结果详情</el-divider>
         
+        <!-- 分页控制 -->
+        <div v-if="currentExecution && currentExecution.execution_results && currentExecution.execution_results.length > resultPageSize" 
+             style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 13px; color: #909399;">
+            共 {{ currentExecution.execution_results.length }} 条结果，当前显示第 {{ (resultCurrentPage - 1) * resultPageSize + 1 }} - {{ Math.min(resultCurrentPage * resultPageSize, currentExecution.execution_results.length) }} 条
+          </span>
+          <el-pagination
+            v-model:current-page="resultCurrentPage"
+            :page-size="resultPageSize"
+            :total="currentExecution.execution_results.length"
+            layout="prev, pager, next"
+            small
+          />
+        </div>
+        
         <div v-if="currentExecution && currentExecution.execution_results && currentExecution.execution_results.length > 0" class="execution-results-container">
-          <div v-for="(result, index) in currentExecution.execution_results" :key="index" class="execution-result-item">
-            <div class="execution-result-header" @click="toggleResultDetail(index)">
+          <div v-for="(result, index) in paginatedExecutionResults" :key="getResultRealIndex(index)" class="execution-result-item">
+            <div class="execution-result-header" @click="toggleResultDetail(getResultRealIndex(index))">
               <el-tag :type="result.item_type === 'api' ? 'primary' : 'success'" size="small">
                 {{ result.item_type === 'api' ? '接口' : '流程' }}
               </el-tag>
@@ -516,17 +702,18 @@
                 <el-tag :type="result.success ? 'success' : 'danger'" size="small">
                   {{ result.success ? '成功' : '失败' }}
                 </el-tag>
-                <el-icon :class="['expand-icon', { 'expanded': expandedResultIndices.has(index) }]">
+                <el-icon :class="['expand-icon', { 'expanded': expandedResultIndices.has(getResultRealIndex(index)) }]">
                   <ArrowDown />
                 </el-icon>
               </div>
             </div>
             
-            <div v-show="expandedResultIndices.has(index)" class="execution-result-content">
+            <!-- 使用 v-if 替代 v-show，只在展开时渲染详细内容 -->
+            <div v-if="expandedResultIndices.has(getResultRealIndex(index))" class="execution-result-content">
               <!-- 左侧：请求参数 -->
               <div class="execution-result-left">
                 <el-divider>请求参数</el-divider>
-                <el-tabs v-model="resultDetailActiveTabs[index]" class="param-tabs">
+                <el-tabs v-model="resultDetailActiveTabs[getResultRealIndex(index)]" class="param-tabs">
                   <el-tab-pane label="URL" name="url">
                     <el-input
                       :value="getRequestUrl(result)"
@@ -714,7 +901,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Star, StarFilled, Plus, List, View, Delete, VideoPlay, Document, Clock, Warning, EditPen, ArrowDown } from '@element-plus/icons-vue'
+import { Search, Star, StarFilled, Plus, List, View, Delete, VideoPlay, Document, Clock, Warning, EditPen, ArrowDown, InfoFilled, Loading, Setting, Connection, Key } from '@element-plus/icons-vue'
 import { useProjectContext } from '@/composables/useProjectContext'
 import * as projectApi from '@/api/projects'
 import { getApiEnvironments } from '@/api/apitest'
@@ -729,10 +916,13 @@ import {
   toggleTestTaskFavorite,
   executeTestTask,
   getTestTaskExecutions,
+  getTestTaskExecution,
   type TestTask,
   type TestTaskItem,
   type TestTaskCreate,
-  type TestTaskExecution
+  type TestTaskExecution,
+  type HeaderReplacement,
+  type AssertionReplacement
 } from '@/api/apitest'
 import type { ApiEndpoint, ApiTestFlow } from '@/api/types'
 
@@ -776,13 +966,53 @@ const addItemDialogVisible = ref(false)
 const addItemType = ref<'api' | 'flow'>('api')
 const selectedApiIds = ref<number[]>([])
 const selectedFlowIds = ref<number[]>([])
+const selectAllApis = ref(false)
+const apiPage = ref(1)
+const apiPageSize = 10
+
+// 获取当前任务已有的任务项类型（api 或 flow）
+const existingItemType = computed(() => {
+  if (!formData.value.items || formData.value.items.length === 0) {
+    return null // 没有任务项，可以添加任何类型
+  }
+  // 返回第一个任务项的类型
+  return formData.value.items[0].item_type as 'api' | 'flow'
+})
+
+// 是否可以添加接口
+const canAddApi = computed(() => {
+  return existingItemType.value === null || existingItemType.value === 'api'
+})
+
+// 是否可以添加流程
+const canAddFlow = computed(() => {
+  return existingItemType.value === null || existingItemType.value === 'flow'
+})
+
+// 任务项表格分页
+const formItemsPage = ref(1)
+const formItemsPageSize = 10
 
 const itemsDialogVisible = ref(false)
 const currentTaskItems = ref<TestTaskItem[]>([])
+const itemsDialogPage = ref(1)
+const itemsDialogPageSize = ref(10)
+
+// 分页后的任务项列表
+const paginatedTaskItems = computed(() => {
+  const start = (itemsDialogPage.value - 1) * itemsDialogPageSize.value
+  return currentTaskItems.value.slice(start, start + itemsDialogPageSize.value)
+})
 
 const executeDialogVisible = ref(false)
-const executeForm = ref({
-  environment_id: 0
+const executeForm = ref<{
+  environment_id: number | undefined
+  header_replacements: HeaderReplacement[]
+  assertion_replacements: AssertionReplacement[]
+}>({
+  environment_id: undefined,
+  header_replacements: [],
+  assertion_replacements: []
 })
 const currentExecuteTask = ref<TestTask | null>(null)
 
@@ -790,11 +1020,30 @@ const detailDialogVisible = ref(false)
 const currentTask = ref<TestTask | null>(null)
 
 const reportDialogVisible = ref(false)
+const currentReportTaskId = ref<number | null>(null)
 const executions = ref<TestTaskExecution[]>([])
 const currentExecution = ref<TestTaskExecution | null>(null)
 const executionDetailDrawerVisible = ref(false)
+const executionDetailLoading = ref(false)
 const resultDetailActiveTabs = ref<Record<number, string>>({})
 const expandedResultIndices = ref<Set<number>>(new Set())
+
+// 执行结果分页
+const resultCurrentPage = ref(1)
+const resultPageSize = 20
+
+// 分页后的执行结果
+const paginatedExecutionResults = computed(() => {
+  if (!currentExecution.value?.execution_results) return []
+  const start = (resultCurrentPage.value - 1) * resultPageSize
+  const end = start + resultPageSize
+  return currentExecution.value.execution_results.slice(start, end)
+})
+
+// 获取结果的真实索引（用于展开状态等）
+const getResultRealIndex = (pageIndex: number) => {
+  return (resultCurrentPage.value - 1) * resultPageSize + pageIndex
+}
 
 const formRef = ref()
 
@@ -961,15 +1210,110 @@ const loadAvailableFlows = async () => {
 const filterApis = (keyword: string) => {
   if (!keyword) {
     filteredApis.value = availableApis.value
-    return
+  } else {
+    const lowerKeyword = keyword.toLowerCase()
+    filteredApis.value = availableApis.value.filter(api => {
+      const method = (api.method || '').toLowerCase()
+      const path = (api.path || '').toLowerCase()
+      const name = (api.name || '').toLowerCase()
+      return method.includes(lowerKeyword) || path.includes(lowerKeyword) || name.includes(lowerKeyword)
+    })
   }
-  const lowerKeyword = keyword.toLowerCase()
-  filteredApis.value = availableApis.value.filter(api => {
-    const method = (api.method || '').toLowerCase()
-    const path = (api.path || '').toLowerCase()
-    const name = (api.name || '').toLowerCase()
-    return method.includes(lowerKeyword) || path.includes(lowerKeyword) || name.includes(lowerKeyword)
+  // 重置到第一页
+  apiPage.value = 1
+  // 更新全选状态
+  updateSelectAllApisState()
+}
+
+
+// 计算全选复选框的半选状态
+const isIndeterminateApis = computed(() => {
+  const selectedCount = selectedApiIds.value.length
+  const filteredCount = filteredApis.value.length
+  return selectedCount > 0 && selectedCount < filteredCount
+})
+
+// 计算要显示的接口列表（包含已选中的接口和当前页的接口，确保已选中的接口能正确显示标签）
+const displayApis = computed(() => {
+  // 如果全选且接口数量超过10个，需要确保所有已选中的接口都在选项中（用于显示标签），但只显示前10条
+  if (selectAllApis.value && filteredApis.value.length > 10) {
+    // 返回所有已选中的接口（确保标签能正确显示），但el-select只会显示前10条在列表中
+    const selectedApis = selectedApiIds.value
+      .map(id => filteredApis.value.find(api => api.id === id))
+      .filter(api => api !== undefined) as ApiEndpoint[]
+    return selectedApis
+  }
+  
+  // 当前页的接口
+  const start = (apiPage.value - 1) * apiPageSize
+  const end = start + apiPageSize
+  const pageApis = filteredApis.value.slice(start, end)
+  
+  // 已选中的接口（确保它们始终在选项中，以便正确显示标签）
+  const selectedApis = selectedApiIds.value
+    .map(id => filteredApis.value.find(api => api.id === id))
+    .filter(api => api !== undefined) as ApiEndpoint[]
+  
+  // 合并当前页接口和已选中接口
+  const allApis = [...selectedApis, ...pageApis]
+  
+  // 去重（按ID），已选中的优先
+  const uniqueMap = new Map<number, ApiEndpoint>()
+  // 先添加已选中的
+  selectedApis.forEach(api => uniqueMap.set(api.id, api))
+  // 再添加当前页的（如果还没添加）
+  pageApis.forEach(api => {
+    if (!uniqueMap.has(api.id)) {
+      uniqueMap.set(api.id, api)
+    }
   })
+  
+  return Array.from(uniqueMap.values())
+})
+
+// 下拉列表只显示最多10条记录，避免下拉列表过长
+const displayApisLimited = computed(() => {
+  const apis = displayApis.value
+  // 下拉列表最多显示10条
+  return apis.slice(0, 10)
+})
+
+// 任务项表格分页显示
+const paginatedFormItems = computed(() => {
+  const items = formData.value.items || []
+  const start = (formItemsPage.value - 1) * formItemsPageSize
+  const end = start + formItemsPageSize
+  return items.slice(start, end)
+})
+
+// 更新全选状态
+const updateSelectAllApisState = () => {
+  const filteredIds = filteredApis.value.map(api => api.id)
+  const allSelected = filteredIds.length > 0 && filteredIds.every(id => selectedApiIds.value.includes(id))
+  selectAllApis.value = allSelected
+}
+
+// 处理分页变化
+const handleApiPageChange = (page: number) => {
+  apiPage.value = page
+}
+
+
+// 处理全选接口
+const handleSelectAllApis = (checked: boolean) => {
+  if (checked) {
+    // 全选：添加所有过滤后的接口ID（不重复）
+    const filteredIds = filteredApis.value.map(api => api.id)
+    filteredIds.forEach(id => {
+      if (!selectedApiIds.value.includes(id)) {
+        selectedApiIds.value.push(id)
+      }
+    })
+  } else {
+    // 取消全选：只移除当前过滤结果中的接口ID，保留其他接口
+    const filteredIds = filteredApis.value.map(api => api.id)
+    selectedApiIds.value = selectedApiIds.value.filter(id => !filteredIds.includes(id))
+  }
 }
 
 // 过滤流程
@@ -1063,6 +1407,8 @@ const handleCreate = async () => {
     cron_expression: '',
     environment_id: undefined
   }
+  // 重置任务项分页
+  formItemsPage.value = 1
   dialogVisible.value = true
   if (formData.value.project_id) {
     loadAvailableApis()
@@ -1114,7 +1460,17 @@ const handleToggleFavorite = async (row: TestTask) => {
 
 const handleExecute = async (row: TestTask) => {
   currentExecuteTask.value = row
-  executeForm.value.environment_id = undefined
+  // 重置表单，默认各显示一行
+  executeForm.value = {
+    environment_id: undefined,
+    header_replacements: [{ key: '', value: '' }],
+    assertion_replacements: [{
+      type: 'status_code',
+      target: '',
+      operator: 'eq',
+      expected: ''
+    } as AssertionReplacement]
+  }
   // 确保环境列表已加载
   if (environments.value.length === 0) {
     await loadEnvironments()
@@ -1129,8 +1485,28 @@ const confirmExecute = async () => {
   }
   executing.value = true
   try {
+    // 过滤掉空的替换项
+    const headerReplacements = executeForm.value.header_replacements.filter(
+      h => h.key && h.value
+    )
+    const assertionReplacements = executeForm.value.assertion_replacements.filter(
+      a => {
+        // 基本字段必须存在
+        if (!a.type || !a.operator || (a.expected === undefined || a.expected === '')) {
+          return false
+        }
+        // json_path 类型需要 target
+        if (a.type === 'json_path' && !a.target) {
+          return false
+        }
+        return true
+      }
+    )
+    
     await executeTestTask(currentExecuteTask.value!.id, {
-      environment_id: executeForm.value.environment_id
+      environment_id: executeForm.value.environment_id,
+      header_replacements: headerReplacements.length > 0 ? headerReplacements : undefined,
+      assertion_replacements: assertionReplacements.length > 0 ? assertionReplacements : undefined
     })
     ElMessage.success('任务已开始执行')
     executeDialogVisible.value = false
@@ -1142,8 +1518,60 @@ const confirmExecute = async () => {
   }
 }
 
+// Header 替换操作
+const addHeaderReplacement = () => {
+  executeForm.value.header_replacements.push({ key: '', value: '' })
+}
+
+const addHeaderReplacementAfter = (index: number) => {
+  executeForm.value.header_replacements.splice(index + 1, 0, { key: '', value: '' })
+}
+
+const removeHeaderReplacement = (index: number) => {
+  if (executeForm.value.header_replacements.length > 1) {
+    executeForm.value.header_replacements.splice(index, 1)
+  } else {
+    // 如果只剩一行，清空内容而不是删除
+    executeForm.value.header_replacements[0] = { key: '', value: '' }
+  }
+}
+
+// Assertion 替换操作
+const addAssertionReplacement = () => {
+  executeForm.value.assertion_replacements.push({
+    type: 'status_code',
+    target: '',
+    operator: 'eq',
+    expected: ''
+  } as AssertionReplacement)
+}
+
+const addAssertionReplacementAfter = (index: number) => {
+  executeForm.value.assertion_replacements.splice(index + 1, 0, {
+    type: 'status_code',
+    target: '',
+    operator: 'eq',
+    expected: ''
+  } as AssertionReplacement)
+}
+
+const removeAssertionReplacement = (index: number) => {
+  if (executeForm.value.assertion_replacements.length > 1) {
+    executeForm.value.assertion_replacements.splice(index, 1)
+  } else {
+    // 如果只剩一行，清空内容而不是删除
+    executeForm.value.assertion_replacements[0] = {
+      type: 'status_code',
+      target: '',
+      operator: 'eq',
+      expected: ''
+    } as AssertionReplacement
+  }
+}
+
 const handleReport = async (row: TestTask) => {
   try {
+    currentReportTaskId.value = row.id
     const response = await getTestTaskExecutions(row.id)
     // 由于响应拦截器已经返回了 response.data，所以 response 本身就是数组
     executions.value = Array.isArray(response) ? response : (response.data || [])
@@ -1154,23 +1582,45 @@ const handleReport = async (row: TestTask) => {
   }
 }
 
-const viewExecutionDetail = (execution: TestTaskExecution) => {
-  currentExecution.value = execution
-  // 重置展开状态，默认所有项都折叠
-  expandedResultIndices.value.clear()
-  // 初始化每个结果的标签页状态
-  if (execution.execution_results) {
-    execution.execution_results.forEach((_, index) => {
-      if (!resultDetailActiveTabs.value[index]) {
-        resultDetailActiveTabs.value[index] = 'url'
-      }
-    })
+const viewExecutionDetail = async (execution: TestTaskExecution) => {
+  if (!currentReportTaskId.value) {
+    ElMessage.error('无法获取任务ID')
+    return
   }
+  
   executionDetailDrawerVisible.value = true
+  executionDetailLoading.value = true
+  
+  try {
+    // 调用 API 获取完整的执行结果（包含 execution_results）
+    const response = await getTestTaskExecution(currentReportTaskId.value, execution.id)
+    const fullExecution = Array.isArray(response) ? response[0] : (response.data || response)
+    currentExecution.value = fullExecution
+    
+    // 重置展开状态和分页
+    expandedResultIndices.value.clear()
+    resultCurrentPage.value = 1
+    resultDetailActiveTabs.value = {}
+    
+    // 初始化当前页结果的标签页状态（延迟初始化，展开时再设置）
+  } catch (error: any) {
+    ElMessage.error('加载执行详情失败: ' + (error.message || '未知错误'))
+    console.error('加载执行详情失败:', error)
+    executionDetailDrawerVisible.value = false
+  } finally {
+    executionDetailLoading.value = false
+  }
 }
 
-const showItemsDialog = (row: TestTask) => {
+const showItemsDialog = async (row: TestTask) => {
   currentTaskItems.value = row.items || []
+  itemsDialogPage.value = 1  // 重置分页到第一页
+  // 加载对应项目的接口和流程数据，以正确显示名称
+  if (row.project_id) {
+    formData.value.project_id = row.project_id
+    await loadAvailableApis()
+    await loadAvailableFlows()
+  }
   itemsDialogVisible.value = true
 }
 
@@ -1182,16 +1632,61 @@ const showAddItemDialog = () => {
   addItemDialogVisible.value = true
   selectedApiIds.value = []
   selectedFlowIds.value = []
+  selectAllApis.value = false
+  apiPage.value = 1
+  
+  // 根据已有任务项类型设置默认 tab
+  if (existingItemType.value === 'api') {
+    addItemType.value = 'api'
+  } else if (existingItemType.value === 'flow') {
+    addItemType.value = 'flow'
+  } else {
+    addItemType.value = 'api' // 默认显示接口 tab
+  }
+  
   loadAvailableApis()
   loadAvailableFlows()
 }
 
+// 监听选中接口变化，更新全选状态
+watch(selectedApiIds, () => {
+  updateSelectAllApisState()
+}, { deep: true })
+
+// 监听过滤后的接口列表变化，更新全选状态
+watch(filteredApis, () => {
+  updateSelectAllApisState()
+}, { deep: true })
+
 const confirmAddItems = () => {
+  // 检查是否有选择
+  if (selectedApiIds.value.length === 0 && selectedFlowIds.value.length === 0) {
+    ElMessage.warning('请至少选择一个接口或流程')
+    return
+  }
+  
+  // 检查是否同时选择了接口和流程
+  if (selectedApiIds.value.length > 0 && selectedFlowIds.value.length > 0) {
+    ElMessage.warning('一个任务只能添加接口或流程，不能混合')
+    return
+  }
+  
+  // 检查与已有任务项类型是否一致
+  if (existingItemType.value) {
+    if (selectedApiIds.value.length > 0 && existingItemType.value !== 'api') {
+      ElMessage.warning('当前任务已添加流程，不能再添加接口')
+      return
+    }
+    if (selectedFlowIds.value.length > 0 && existingItemType.value !== 'flow') {
+      ElMessage.warning('当前任务已添加接口，不能再添加流程')
+      return
+    }
+  }
+  
   // 获取当前最大排序值
   const maxSortOrder = formData.value.items?.length ? Math.max(...formData.value.items.map(i => i.sort_order || 0)) : -1
   let nextSortOrder = maxSortOrder + 1
   
-  // 同时处理接口和流程的选择
   // 添加接口
   selectedApiIds.value.forEach(id => {
     if (!formData.value.items?.find(item => item.item_type === 'api' && item.item_id === id)) {
@@ -1214,12 +1709,6 @@ const confirmAddItems = () => {
     }
   })
   
-  // 检查是否有选择
-  if (selectedApiIds.value.length === 0 && selectedFlowIds.value.length === 0) {
-    ElMessage.warning('请至少选择一个接口或流程')
-    return
-  }
-  
   addItemDialogVisible.value = false
   ElMessage.success(`成功添加 ${selectedApiIds.value.length + selectedFlowIds.value.length} 个项目`)
   
@@ -1230,6 +1719,20 @@ const confirmAddItems = () => {
 
 const removeItem = (index: number) => {
   formData.value.items?.splice(index, 1)
+  // 如果删除后当前页没有数据了，自动跳转到前一页
+  if (formData.value.items && paginatedFormItems.value.length === 0 && formItemsPage.value > 1) {
+    formItemsPage.value--
+  }
+}
+
+// 通过行数据删除任务项（用于分页场景）
+const removeItemById = (row: { item_type: string; item_id: number }) => {
+  const index = formData.value.items?.findIndex(
+    item => item.item_type === row.item_type && item.item_id === row.item_id
+  )
+  if (index !== undefined && index !== -1) {
+    removeItem(index)
+  }
 }
 
 const handleEdit = async (row: TestTask) => {
@@ -1250,6 +1753,8 @@ const handleEdit = async (row: TestTask) => {
       cron_expression: currentTask.value.cron_expression || '',
       environment_id: currentTask.value.environment_id
     }
+    // 重置任务项分页
+    formItemsPage.value = 1
     dialogVisible.value = true
     if (formData.value.project_id) {
       await loadAvailableApis()
@@ -1331,36 +1836,79 @@ onUnmounted(() => {
 
 <style scoped>
 .test-task-page {
-  padding: 20px;
+  height: 100%;
+  animation: fadeIn 0.5s ease-in;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .filter-card {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.filter-card:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .filter-header {
-  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #f0f2f5;
 }
 
 .filter-header h2 {
   margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.5px;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 20px;
-  font-weight: 500;
 }
 
 .filter-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .filter-left {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .filter-left > * {
@@ -1369,11 +1917,25 @@ onUnmounted(() => {
 
 .filter-right {
   display: flex;
-  gap: 10px;
+  gap: 12px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .table-card {
-  margin-bottom: 20px;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.table-card:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .favorite-icon {
@@ -1404,6 +1966,17 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-right: 30px;
+}
+
+/* 任务项列表弹框关闭按钮样式 - 白色背景显示深色关闭按钮 */
+.items-dialog-centered :deep(.el-dialog__headerbtn .el-dialog__close) {
+  color: #909399;
+  font-size: 20px;
+}
+
+.items-dialog-centered :deep(.el-dialog__headerbtn:hover .el-dialog__close) {
+  color: #409eff;
 }
 
 .dialog-title {
@@ -1863,5 +2436,301 @@ onUnmounted(() => {
   font-weight: 600;
   color: #333;
 }
+
+/* 限制下拉列表高度，每页显示约10条记录 */
+:deep(.api-select-dropdown) {
+  max-height: 300px;
+}
+
+:deep(.api-select-dropdown .el-select-dropdown__list) {
+  max-height: 300px;
+}
+
+/* 全选且数量多时，隐藏下拉列表的选项 */
+:deep(.api-select-dropdown-empty .el-select-dropdown__list) {
+  max-height: 100px;
+  padding: 0;
+}
+
+:deep(.api-select-dropdown-empty .el-select-dropdown__item) {
+  display: none !important;
+}
+
+/* 删除按钮去掉白色背景和立体感 */
+.delete-btn-no-bg {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 4px 8px !important;
+}
+
+.delete-btn-no-bg:hover,
+.delete-btn-no-bg:focus,
+.delete-btn-no-bg:active {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+:deep(.el-table) .delete-btn-no-bg {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+:deep(.el-table) .delete-btn-no-bg:hover,
+:deep(.el-table) .delete-btn-no-bg:focus {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 执行对话框样式 */
+.execute-dialog :deep(.el-dialog__header) {
+  padding: 20px 24px 16px;
+  margin: 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.execute-dialog :deep(.el-dialog__body) {
+  padding: 0;
+}
+
+.execute-dialog :deep(.el-dialog__footer) {
+  padding: 16px 24px 20px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.execute-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.execute-dialog-icon {
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.execute-dialog-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.execute-dialog-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.execute-dialog-desc {
+  font-size: 13px;
+  color: #909399;
+}
+
+.execute-dialog-content {
+  padding: 20px 24px;
+}
+
+.execute-section {
+  background: #fafafa;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.execute-section:last-child {
+  margin-bottom: 0;
+}
+
+.execute-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.section-icon {
+  font-size: 16px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  flex: 1;
+}
+
+.execute-section-body {
+  padding: 16px;
+}
+
+/* 替换设置组 */
+.replacement-group {
+  background: white;
+  border-radius: 6px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+}
+
+.replacement-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #e4e7ed;
+}
+
+.replacement-group-title > span:first-child {
+  font-size: 13px;
+  font-weight: 500;
+  color: #606266;
+}
+
+.replacement-hint {
+  font-size: 12px;
+  color: #909399;
+}
+
+/* 替换设置样式 */
+.replacement-list {
+  width: 100%;
+}
+
+.replacement-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 8px 8px;
+  background: #f9fafc;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+}
+
+.replacement-row:hover {
+  background: #f0f5ff;
+}
+
+.assertion-replacement-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 8px 8px;
+  background: #f9fafc;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+  flex-wrap: nowrap;
+}
+
+.assertion-replacement-row:hover {
+  background: #f0f5ff;
+}
+
+.replacement-row:last-child,
+.assertion-replacement-row:last-child {
+  margin-bottom: 0;
+}
+
+/* 输入框样式 */
+.replacement-key-input {
+  width: 160px;
+  flex-shrink: 0;
+}
+
+.replacement-value-input {
+  flex: 1;
+  min-width: 80px;
+}
+
+.assertion-type-select {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+/* JSON路径的路径输入框、操作符下拉框宽度一致 */
+.assertion-target-input {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+/* 操作符下拉框与路径输入框宽度一致 */
+.assertion-operator-select {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+/* 操作按钮容器 */
+.replacement-actions {
+  display: flex;
+  gap: 0;
+  width: 70px;
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+/* 替换设置中的链接按钮 */
+.replacement-row .el-button.is-link,
+.assertion-replacement-row .el-button.is-link,
+.replacement-actions .el-button.is-link {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 4px 4px !important;
+  font-size: 13px;
+}
+
+.replacement-row .el-button.is-link:hover,
+.replacement-row .el-button.is-link:focus,
+.assertion-replacement-row .el-button.is-link:hover,
+.assertion-replacement-row .el-button.is-link:focus,
+.replacement-actions .el-button.is-link:hover,
+.replacement-actions .el-button.is-link:focus {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.replacement-actions .el-button.is-link.el-button--primary {
+  color: #409eff !important;
+}
+
+.replacement-actions .el-button.is-link.el-button--primary:hover {
+  color: #66b1ff !important;
+}
+
+.replacement-actions .el-button.is-link.el-button--danger {
+  color: #f56c6c !important;
+}
+
+.replacement-actions .el-button.is-link.el-button--danger:hover {
+  color: #f78989 !important;
+}
+
+/* 底部按钮 */
+.execute-dialog-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.execute-dialog-footer .el-button {
+  min-width: 100px;
+}
+
 </style>
 

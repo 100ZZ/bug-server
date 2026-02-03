@@ -19,7 +19,7 @@
                 <div style="max-width: 300px; line-height: 1.6;">
                   如果有任何问题，
                   <a 
-                    href="https://github.com/100ZZ/bug-server" 
+                    href="https://di-matrix.feishu.cn/docx/TsgUdaWCnojvWxxnNkMc9GsZn3f" 
                     target="_blank"
                     style="color: #409eff; text-decoration: underline;"
                   >
@@ -89,6 +89,9 @@
                 </el-menu-item>
                 <el-menu-item index="/apitest/codescan">
                   <span>代码扫描</span>
+                </el-menu-item>
+                <el-menu-item index="/apitest/files">
+                  <span>文件管理</span>
                 </el-menu-item>
               </el-sub-menu>
               <el-menu-item index="/bugs">

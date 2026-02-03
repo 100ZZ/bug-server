@@ -71,5 +71,10 @@ if __name__ == "__main__":
                     "propagate": False,
                 },
             },
+            # 让应用内 logger.info()（如 app 模块）输出到控制台
+            "root": {
+                "level": "INFO",
+                "handlers": ["default"],
+            },
         }
     )

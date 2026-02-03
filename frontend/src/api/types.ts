@@ -322,14 +322,14 @@ export interface CodeScan {
   project?: Project
   project_name: string
   branch: string
-  scan_path: string
+  scan_path?: string
   language?: string
   sonar_project_key?: string
   sonar_host?: string
   sonar_login?: string
   scan_time?: string
   result?: 'passed' | 'failed'
-  scanning?: boolean
+  error_message?: string  // 扫描不通过的原因或错误信息
   created_at: string
   updated_at: string
 }
@@ -346,33 +346,6 @@ export interface Model {
   is_default: boolean
   status: 'active' | 'inactive'
   description?: string
-  created_at: string
-  updated_at: string
-}
-
-export interface CodeScanResult {
-  id: number
-  scan_id: number
-  scan?: CodeScan
-  status?: 'running' | 'completed' | 'failed'
-  error_message?: string
-  scan_output?: string
-  issues?: Array<{
-    severity: string
-    type: string
-    message: string
-    file: string
-    line?: number
-    rule?: string
-  }>
-  metrics?: {
-    bugs?: number
-    vulnerabilities?: number
-    code_smells?: number
-    coverage?: number
-    duplicated_lines?: number
-  }
-  status: 'running' | 'completed' | 'failed'
   created_at: string
   updated_at: string
 }

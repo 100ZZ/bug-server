@@ -160,23 +160,23 @@
               @row-click="handleRowClick"
               :row-style="{ cursor: 'pointer' }"
             >
-            <el-table-column label="编号" width="160">
+            <el-table-column label="编号" width="160" align="center">
               <template #default="{ row }">
                 {{ row.case_key }}
               </template>
             </el-table-column>
-            <el-table-column prop="title" label="用例名称" min-width="350" show-overflow-tooltip />
+            <el-table-column prop="title" label="用例名称" min-width="350" align="center" show-overflow-tooltip />
             <el-table-column prop="priority" label="等级" width="100" align="center">
               <template #default="{ row }">
                 <el-tag :type="getPriorityTag(row.priority)" size="small">{{ row.priority || 'P2' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="创建人" width="120">
+            <el-table-column label="创建人" width="120" align="center">
               <template #default="{ row }">
                 {{ row.creator?.display_name || row.creator?.username || '-' }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="180" fixed="right">
+            <el-table-column label="操作" width="180" fixed="right" align="center">
               <template #default="{ row }">
                 <el-button link type="primary" @click.stop="handleCopy(row)" class="table-action-btn">
                   <el-icon><CopyDocument /></el-icon>

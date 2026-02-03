@@ -1,5 +1,6 @@
 """缺陷管理系统 FastAPI 主应用"""
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Request, Form
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy import func, and_, or_
@@ -13,6 +14,7 @@ import re
 import hashlib
 import base64
 import os
+import subprocess
 import warnings
 
 # 过滤 Pydantic 的受保护命名空间警告
@@ -615,9 +617,154 @@ def delete_bug(
         raise HTTPException(status_code=401, detail="用户不存在")
     check_project_member_permission(user, bug.project, "删除缺陷")
     
+    # 删除缺陷相关的图片文件夹
+    bug_image_folder = os.path.join(BUG_IMAGE_DIR, bug.bug_key)
+    if os.path.exists(bug_image_folder):
+        import shutil
+        try:
+            shutil.rmtree(bug_image_folder)
+        except Exception as e:
+            print(f"删除图片文件夹失败: {e}")
+    
     db.delete(bug)
     db.commit()
     return {"message": "缺陷已删除"}
+
+# ==================== 缺陷图片管理 ====================
+
+@app.post("/api/bugs/{bug_key}/images")
+async def upload_bug_image(
+    bug_key: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """上传缺陷截图
+    
+    图片存储目录结构：
+    - images/{bug_key}/{uuid}.{ext}
+    
+    例如：images/BUG-001/a1b2c3d4.png
+    """
+    import uuid
+    
+    # 验证缺陷是否存在
+    bug = db.query(models.Bug).filter(models.Bug.bug_key == bug_key).first()
+    if not bug:
+        raise HTTPException(status_code=404, detail="缺陷不存在")
+    
+    # 验证文件类型
+    allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp']
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="不支持的图片格式，请上传 jpg/png/gif/webp/bmp 格式的图片")
+    
+    # 创建缺陷图片目录
+    bug_image_folder = os.path.join(BUG_IMAGE_DIR, bug_key)
+    os.makedirs(bug_image_folder, exist_ok=True)
+    
+    # 生成唯一文件名
+    ext = os.path.splitext(file.filename)[1] if file.filename else '.png'
+    if not ext:
+        # 根据 content_type 推断扩展名
+        ext_map = {
+            'image/jpeg': '.jpg',
+            'image/png': '.png',
+            'image/gif': '.gif',
+            'image/webp': '.webp',
+            'image/bmp': '.bmp'
+        }
+        ext = ext_map.get(file.content_type, '.png')
+    
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(bug_image_folder, unique_name)
+    
+    # 保存文件
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    # 返回图片访问路径（相对路径）
+    image_url = f"/api/bugs/{bug_key}/images/{unique_name}"
+    
+    return {
+        "url": image_url,
+        "filename": unique_name,
+        "size": len(content),
+        "content_type": file.content_type
+    }
+
+@app.get("/api/bugs/{bug_key}/images/{filename}")
+async def get_bug_image(
+    bug_key: str,
+    filename: str
+):
+    """获取缺陷截图"""
+    file_path = os.path.join(BUG_IMAGE_DIR, bug_key, filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    
+    # 根据扩展名确定 MIME 类型
+    ext = os.path.splitext(filename)[1].lower()
+    mime_map = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.bmp': 'image/bmp'
+    }
+    media_type = mime_map.get(ext, 'application/octet-stream')
+    
+    return FileResponse(file_path, media_type=media_type)
+
+@app.delete("/api/bugs/{bug_key}/images/{filename}")
+async def delete_bug_image(
+    bug_key: str,
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """删除缺陷截图"""
+    file_path = os.path.join(BUG_IMAGE_DIR, bug_key, filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    
+    try:
+        os.remove(file_path)
+        
+        # 如果文件夹为空，删除文件夹
+        bug_image_folder = os.path.join(BUG_IMAGE_DIR, bug_key)
+        if os.path.isdir(bug_image_folder) and not os.listdir(bug_image_folder):
+            os.rmdir(bug_image_folder)
+            
+        return {"message": "图片已删除"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除图片失败: {str(e)}")
+
+@app.get("/api/bugs/{bug_key}/images")
+async def list_bug_images(
+    bug_key: str,
+    db: Session = Depends(get_db)
+):
+    """获取缺陷的所有截图列表"""
+    bug_image_folder = os.path.join(BUG_IMAGE_DIR, bug_key)
+    
+    if not os.path.exists(bug_image_folder):
+        return {"images": []}
+    
+    images = []
+    for filename in os.listdir(bug_image_folder):
+        file_path = os.path.join(bug_image_folder, filename)
+        if os.path.isfile(file_path):
+            images.append({
+                "url": f"/api/bugs/{bug_key}/images/{filename}",
+                "filename": filename,
+                "size": os.path.getsize(file_path)
+            })
+    
+    return {"images": images}
 
 # ==================== 评论管理 ====================
 
@@ -2266,11 +2413,12 @@ def create_api_environment(
         raise HTTPException(status_code=401, detail="用户不存在")
     check_project_member_permission(user, project, "创建环境")
     
-    # 检查环境信息（base_url）是否已存在（全局唯一）
+    # 检查环境信息（base_url）在该项目下是否已存在（项目+环境信息组合唯一）
     if db.query(models.ApiEnvironment).filter(
+        models.ApiEnvironment.project_id == environment.project_id,
         models.ApiEnvironment.base_url == environment.base_url
     ).first():
-        raise HTTPException(status_code=400, detail="环境信息已存在，不能重复")
+        raise HTTPException(status_code=400, detail="该项目下环境信息已存在，不能重复")
     
     db_environment = models.ApiEnvironment(**environment.model_dump())
     db.add(db_environment)
@@ -2310,13 +2458,16 @@ def update_api_environment(
         # 检查新项目的权限
         check_project_member_permission(user, new_project, "更新环境到该项目")
         
-    # 如果更新了环境信息（base_url），检查是否已存在（排除当前环境）
-    if 'base_url' in update_data:
+    # 如果更新了环境信息（base_url）或项目ID，检查组合是否已存在（排除当前环境）
+    if 'base_url' in update_data or 'project_id' in update_data:
+        check_project_id = update_data.get('project_id', db_environment.project_id)
+        check_base_url = update_data.get('base_url', db_environment.base_url)
         if db.query(models.ApiEnvironment).filter(
-            models.ApiEnvironment.base_url == update_data['base_url'],
+            models.ApiEnvironment.project_id == check_project_id,
+            models.ApiEnvironment.base_url == check_base_url,
             models.ApiEnvironment.id != environment_id
         ).first():
-            raise HTTPException(status_code=400, detail="环境信息已存在，不能重复")
+            raise HTTPException(status_code=400, detail="该项目下环境信息已存在，不能重复")
     
     for key, value in update_data.items():
         setattr(db_environment, key, value)
@@ -2465,9 +2616,9 @@ def execute_code_scan(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """执行代码扫描"""
+    """调用 SonarQube 质量门 API，成功则根据返回结果更新扫描状态（不执行 mvn）"""
     db_scan = db.query(models.CodeScan).options(
-        joinedload(models.CodeScan.project)
+        joinedload(models.CodeScan.project).joinedload(models.Project.members)
     ).filter(models.CodeScan.id == scan_id).first()
     if not db_scan:
         raise HTTPException(status_code=404, detail="扫描任务不存在")
@@ -2478,326 +2629,314 @@ def execute_code_scan(
         raise HTTPException(status_code=401, detail="用户不存在")
     check_project_member_permission(user, db_scan.project, "执行代码扫描")
     
-    # 创建扫描结果记录
-    scan_result = models.CodeScanResult(
-        scan_id=scan_id,
-        status='running'
-    )
-    db.add(scan_result)
-    db.commit()
-    db.refresh(scan_result)
+    # 检查是否配置了 Sonar Host
+    if not db_scan.sonar_host:
+        raise HTTPException(status_code=400, detail="请先配置 Sonar Host")
     
-    # 异步执行扫描（实现实际的sonar扫描逻辑）
-    import threading
-    def run_scan():
-        # 在线程内部创建新的数据库会话
-        thread_db = SessionLocal()
-        try:
-            import subprocess
-            import os
-            import time
-            import json
-            from datetime import datetime
-            from pathlib import Path
+    # 构建 Sonar 项目 Key
+    project_key = db_scan.sonar_project_key or f"{db_scan.project_name}:{db_scan.branch}"
+    
+    sonar_host = db_scan.sonar_host.rstrip('/')
+    
+    # 仅调用 Sonar 质量门 API，调用成功即更新状态（不在此接口执行 mvn，避免长时间等待）
+    api_url = f"{sonar_host}/api/qualitygates/project_status"
+    
+    # 指标名称映射
+    metric_names = {
+        'new_coverage': '新代码覆盖率',
+        'coverage': '代码覆盖率',
+        'new_duplicated_lines_density': '新代码重复率',
+        'duplicated_lines_density': '代码重复率',
+        'new_reliability_rating': '新代码可靠性',
+        'reliability_rating': '可靠性等级',
+        'new_security_rating': '新代码安全性',
+        'security_rating': '安全性等级',
+        'new_maintainability_rating': '新代码可维护性',
+        'sqale_rating': '可维护性等级',
+        'new_bugs': '新增Bug数',
+        'bugs': 'Bug数',
+        'new_vulnerabilities': '新增漏洞数',
+        'vulnerabilities': '漏洞数',
+        'new_code_smells': '新增代码异味',
+        'code_smells': '代码异味数',
+        'new_security_hotspots_reviewed': '新代码安全热点审查率',
+        'security_hotspots_reviewed': '安全热点审查率'
+    }
+    
+    # 比较运算符映射
+    comparators = {
+        'LT': '<',
+        'GT': '>',
+        'EQ': '=',
+        'NE': '≠',
+        'LE': '≤',
+        'GE': '≥'
+    }
+    
+    try:
+        headers = {}
+        if db_scan.sonar_login:
+            # 使用 Token 认证
+            auth_string = f"{db_scan.sonar_login}:"
+            auth_bytes = base64.b64encode(auth_string.encode()).decode()
+            headers['Authorization'] = f'Basic {auth_bytes}'
+        
+        response = requests.get(
+            api_url,
+            params={'projectKey': project_key},
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            project_status = data.get('projectStatus', {})
+            status = project_status.get('status', '')
+            conditions = project_status.get('conditions', [])
             
-            # 重新查询扫描任务以获取最新信息
-            db_scan_thread = thread_db.query(models.CodeScan).filter(models.CodeScan.id == scan_id).first()
-            if not db_scan_thread:
-                raise Exception("扫描任务不存在")
+            # 扫描状态以调用 Sonar 质量门 API 成功后的结果为准（与 mvn 是否执行无关）
+            db_scan.result = 'passed' if status == 'OK' else 'failed'
+            db_scan.scan_time = datetime.now()
             
-            scan_path = db_scan_thread.scan_path
-            # 优先使用表单中配置的 projectKey，如果没有则使用默认格式
-            project_key = db_scan_thread.sonar_project_key or f"{db_scan_thread.project_name}:{db_scan_thread.branch}"
+            # 解析不通过的条件
+            error_details = []
+            conditions_out = []
+            if status != 'OK' and conditions:
+                for cond in conditions:
+                    if cond.get('status') == 'ERROR':
+                        metric_key = cond.get('metricKey', '')
+                        metric_name = metric_names.get(metric_key, metric_key)
+                        comparator = comparators.get(cond.get('comparator', ''), cond.get('comparator', ''))
+                        threshold = cond.get('errorThreshold', '')
+                        actual = cond.get('actualValue', '')
+                        error_details.append(f"{metric_name}: {actual} (要求{comparator}{threshold})")
+                        conditions_out.append({
+                            "metric_key": metric_key,
+                            "metric_name": metric_name,
+                            "actual_value": actual,
+                            "error_threshold": threshold,
+                            "comparator": comparator,
+                        })
             
-            # 初始化扫描输出
-            scan_output = f"🔍 开始执行Sonar扫描: {project_key}\n"
-            scan_output += f"📂 扫描路径: {scan_path}\n"
-            scan_output += f"🔧 编程语言: {db_scan_thread.language or '未指定'}\n\n"
-            
-            print(f"🔍 开始执行Sonar扫描: {project_key}")
-            print(f"📂 扫描路径: {scan_path}")
-            print(f"🔧 编程语言: {db_scan_thread.language or '未指定'}")
-            
-            # 检查扫描路径是否存在
-            if not os.path.exists(scan_path):
-                error_msg = f"扫描路径不存在: {scan_path}"
-                scan_output += f"❌ {error_msg}\n"
-                raise Exception(error_msg)
-            
-            # 优先使用表单中配置的 SonarQube 配置，如果没有则从环境变量获取
-            sonar_url = db_scan_thread.sonar_host or os.getenv("SONAR_URL", "http://localhost:9000")
-            sonar_token = db_scan_thread.sonar_login or os.getenv("SONAR_TOKEN", "")
-            
-            # 生成sonar-project.properties文件（如果不存在）
-            properties_path = os.path.join(scan_path, "sonar-project.properties")
-            print(f"📝 更新sonar-project.properties文件")
-            with open(properties_path, 'w') as f:
-                f.write(f"sonar.projectKey={project_key}\n")
-                f.write(f"sonar.projectName={db_scan_thread.project_name}\n")
-                f.write(f"sonar.sources=.\n")
-                # 如果指定了编程语言，添加语言配置
-                if db_scan_thread.language:
-                    f.write(f"sonar.language={db_scan_thread.language.lower()}\n")
-                if sonar_url:
-                    f.write(f"sonar.host.url={sonar_url}\n")
-                if sonar_token:
-                    f.write(f"sonar.login={sonar_token}\n")
-            
-            # 检查mvn是否可用
-            java_version = None
-            try:
-                result = subprocess.run(['mvn', '--version'], 
-                                      capture_output=True, text=True, timeout=5)
-                mvn_available = result.returncode == 0
-                # 检查Java版本
-                java_version_output = result.stdout or result.stderr
-                import re
-                java_version_match = re.search(r'Java version:\s*(\d+)', java_version_output)
-                if java_version_match:
-                    java_version = int(java_version_match.group(1))
-                    print(f"🔍 检测到Java版本: {java_version}")
-                else:
-                    print(f"⚠️ 无法从Maven输出中识别Java版本")
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                mvn_available = False
-            
-            if mvn_available:
-                # 必须传递三个参数
-                if not project_key:
-                    raise Exception("Sonar projectKey 未配置，请先配置扫描任务的 Sonar ProjectKey")
-                if not sonar_url:
-                    raise Exception("Sonar host 未配置，请先配置扫描任务的 Sonar Host")
-                if not sonar_token:
-                    raise Exception("Sonar login 未配置，请先配置扫描任务的 Sonar Login")
-                
-                # 如果Java版本是8，需要使用兼容的Sonar Maven Plugin版本
-                if java_version and java_version < 11:
-                    print(f"⚠️ 检测到Java {java_version}，将使用兼容的Sonar Maven Plugin 3.9.1.2184版本（支持JDK 8）")
-                    scan_output += f"⚠️ 检测到Java {java_version}，使用兼容的Sonar Maven Plugin 3.9.1.2184版本（支持JDK 8）\n\n"
-                    # 使用完整插件坐标指定兼容JDK 8的版本
-                    cmd = ['mvn', 'org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.1.2184:sonar']
-                else:
-                    print(f"✅ 使用mvn sonar:sonar执行扫描")
-                    scan_output += "✅ 使用mvn sonar:sonar执行扫描\n\n"
-                    cmd = ['mvn', 'sonar:sonar']
-                
-                cmd.append(f'-Dsonar.projectKey={project_key}')
-                cmd.append(f'-Dsonar.host.url={sonar_url}')
-                cmd.append(f'-Dsonar.login={sonar_token}')
-                
-                print(f"🔧 执行命令: {' '.join(cmd)}")
-                print(f"📂 工作目录: {scan_path}")
-                scan_output += f"🔧 执行命令: {' '.join(cmd)}\n"
-                scan_output += f"📂 工作目录: {scan_path}\n\n"
-                
-                # 设置环境变量，尝试使用JAVA_HOME（如果设置了）
-                env = os.environ.copy()
-                java_home = env.get('JAVA_HOME')
-                if java_home:
-                    print(f"🔍 使用 JAVA_HOME: {java_home}")
-                    scan_output += f"🔍 使用 JAVA_HOME: {java_home}\n\n"
-                
-                process = subprocess.run(
-                    cmd,
-                    cwd=scan_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=600,  # 10分钟超时
-                    env=env
-                )
-                
-                # 保存扫描过程的输出
-                if process.stdout:
-                    scan_output += "=== 标准输出 ===\n" + process.stdout
-                    print(f"📤 命令输出: {process.stdout}")
-                if process.stderr:
-                    scan_output += "\n\n=== 错误输出 ===\n" + process.stderr
-                    print(f"⚠️ 命令错误输出: {process.stderr}")
-                
-                if process.returncode != 0:
-                    error_output = process.stderr or process.stdout
-                    # 保存完整的扫描输出（包括错误信息）
-                    if error_output:
-                        scan_output = scan_output + "\n\n=== 扫描失败 ===\n" + error_output
-                    
-                    # 检查是否是Java版本不兼容的错误
-                    if 'UnsupportedClassVersionError' in error_output or 'class file version' in error_output:
-                        error_msg = (
-                            "Java版本不兼容：Sonar Maven Plugin 4.0+ 需要 Java 11 或更高版本。\n"
-                            "解决方案：\n"
-                            "1. 升级 Java 版本到 11 或更高（推荐 Java 17）\n"
-                            "2. 或者在系统环境变量中设置 JAVA_HOME 指向 Java 11+\n"
-                            "3. 或者使用更低版本的 Sonar Maven Plugin（在项目的 pom.xml 中指定版本）\n\n"
-                            f"错误详情：{error_output[-1000:]}"  # 只显示最后1000个字符
-                        )
-                        raise Exception(error_msg)
-                    else:
-                        raise Exception(f"Sonar扫描失败: {error_output[-2000:] if len(error_output) > 2000 else error_output}")
-                
-                print(f"✅ Sonar扫描完成，等待结果生成...")
-                time.sleep(3)  # 等待结果生成
-                
-                # 从SonarQube API获取扫描结果
-                metrics = {}
-                issues = {}
-                try:
-                    if sonar_url and sonar_token:
-                        # 获取项目指标
-                        import requests
-                        api_url = f"{sonar_url}/api/measures/component"
-                        params = {
-                            "component": project_key,
-                            "metricKeys": "bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,new_bugs,new_vulnerabilities,new_code_smells,new_coverage,new_duplicated_lines_density,sqale_debt_ratio,new_technical_debt"
-                        }
-                        headers = {"Authorization": f"Bearer {sonar_token}"}
-                        
-                        response = requests.get(api_url, params=params, headers=headers, timeout=10)
-                        if response.status_code == 200:
-                            data = response.json()
-                            for measure in data.get("component", {}).get("measures", []):
-                                metric = measure.get("metric")
-                                value = measure.get("value", "0")
-                                metrics[metric] = float(value) if value else 0
-                        
-                        # 获取问题列表
-                        issues_url = f"{sonar_url}/api/issues/search"
-                        issues_params = {
-                            "componentKeys": project_key,
-                            "resolved": "false",
-                            "ps": 100
-                        }
-                        issues_response = requests.get(issues_url, params=issues_params, headers=headers, timeout=10)
-                        if issues_response.status_code == 200:
-                            issues_data = issues_response.json()
-                            issues_list = []
-                            for issue in issues_data.get("issues", []):
-                                issues_list.append({
-                                    "key": issue.get("key"),
-                                    "severity": issue.get("severity"),
-                                    "type": issue.get("type"),
-                                    "message": issue.get("message"),
-                                    "file": issue.get("component"),
-                                    "line": issue.get("line")
-                                })
-                            issues = {"issues": issues_list, "total": issues_data.get("total", 0)}
-                except Exception as api_error:
-                    print(f"⚠️ 无法从SonarQube API获取结果: {api_error}")
-                    # 使用默认值
-                    metrics = {
-                    "bugs": 0,
-                    "vulnerabilities": 0,
-                    "code_smells": 0,
-                        "coverage": 0.0,
-                        "duplicated_lines_density": 0.0
-                }
-                    issues = {}
+            # 存储错误信息，截断过长内容；无具体条件时也给出可读说明并写日志
+            if error_details:
+                error_msg = '; '.join(error_details)
+                if len(error_msg) > 500:
+                    error_msg = error_msg[:497] + '...'
+                db_scan.error_message = error_msg
             else:
-                print(f"⚠️ mvn不可用，无法执行扫描")
-                raise Exception("Maven 未安装或不可用，请确保已安装 Maven 并配置到 PATH 环境变量中")
+                if status != 'OK':
+                    db_scan.error_message = "质量门未通过（未返回具体条件）。请点「详情」→ 右上角「打开 Sonar」进入项目页面，在 Sonar 里查看质量门与未通过项"
+                else:
+                    db_scan.error_message = None
             
-            # 更新扫描结果
-            db_result = thread_db.query(models.CodeScanResult).filter(models.CodeScanResult.id == scan_result.id).first()
-            if db_result:
-                db_result.status = 'completed'
-                db_result.metrics = metrics
-                db_result.issues = issues if issues else {}
-                # 保存扫描过程的输出
-                if 'scan_output' in locals():
-                    db_result.scan_output = scan_output
-                thread_db.commit()
-                
-                # 更新扫描任务
-                db_scan_thread.scan_time = datetime.now()
-                # 根据Bug数量判断结果：只要Bug数量>0，结果就是"不通过"
-                bugs_count = metrics.get("bugs", 0)
-                db_scan_thread.result = 'passed' if bugs_count == 0 else 'failed'
-                thread_db.commit()
-                
-                print(f"✅ 扫描完成: {db_scan_thread.result}, Bug数量: {bugs_count}")
-        except subprocess.TimeoutExpired:
-            error_msg = "扫描超时（超过10分钟）"
-            try:
-                db_result = thread_db.query(models.CodeScanResult).filter(models.CodeScanResult.id == scan_result.id).first()
-                if db_result:
-                    db_result.status = 'failed'
-                    db_result.error_message = error_msg
-                    # 保存扫描输出
-                    if scan_output:
-                        db_result.scan_output = scan_output + "\n\n=== 错误信息 ===\n" + error_msg
-                    else:
-                        db_result.scan_output = error_msg
-                    thread_db.commit()
-                
-                # 更新扫描任务状态为失败
-                db_scan_thread = thread_db.query(models.CodeScan).filter(models.CodeScan.id == scan_id).first()
-                if db_scan_thread:
-                    db_scan_thread.result = 'failed'
-                    db_scan_thread.scan_time = datetime.now()
-                    thread_db.commit()
-            except Exception as inner_e:
-                print(f"更新扫描结果状态失败: {inner_e}")
-            print(f"❌ {error_msg}")
-        except Exception as e:
-            error_msg = str(e)
-            try:
-                db_result = thread_db.query(models.CodeScanResult).filter(models.CodeScanResult.id == scan_result.id).first()
-                if db_result:
-                    db_result.status = 'failed'
-                    db_result.error_message = error_msg
-                    # 保存扫描输出
-                    if scan_output:
-                        db_result.scan_output = scan_output + "\n\n=== 错误信息 ===\n" + error_msg
-                    else:
-                        db_result.scan_output = error_msg
-                    thread_db.commit()
-                
-                # 更新扫描任务状态为失败
-                db_scan_thread = thread_db.query(models.CodeScan).filter(models.CodeScan.id == scan_id).first()
-                if db_scan_thread:
-                    db_scan_thread.result = 'failed'
-                    db_scan_thread.scan_time = datetime.now()
-                    thread_db.commit()
-            except Exception as inner_e:
-                print(f"更新扫描结果状态失败: {inner_e}")
-            print(f"❌ 扫描失败: {error_msg}")
-        finally:
-            # 确保关闭线程的数据库会话
-            thread_db.close()
-    
-    thread = threading.Thread(target=run_scan)
-    thread.daemon = True
-    thread.start()
-    
-    return {"message": "扫描任务已启动", "result_id": scan_result.id}
+            # 扫描不通过时写一条日志（含原始 conditions），便于排查
+            if status != 'OK':
+                import logging
+                _log = logging.getLogger(__name__)
+                _log.info(
+                    "code_scan execute: 质量门未通过 scan_id=%s project_key=%s sonar_status=%s error_message=%s",
+                    scan_id, project_key, status, db_scan.error_message or "(无详情)"
+                )
+                if not error_details and conditions:
+                    _log.info("code_scan execute: raw conditions from SonarQube: %s", conditions)
+            
+            # 记录本次扫描结果历史（状态与扫描结果一致：质量门 OK 则为 completed）
+            history = models.CodeScanResult(
+                scan_id=db_scan.id,
+                status='completed' if db_scan.result == 'passed' else 'failed',
+                error_message=db_scan.error_message,
+            )
+            db.add(history)
+            
+            db.commit()
+            db.refresh(db_scan)
+            return {
+                "message": "扫描完成",
+                "result": db_scan.result,
+                "scan_time": db_scan.scan_time.isoformat() if db_scan.scan_time else None,
+                "sonar_status": status,
+                "error_message": db_scan.error_message,
+                "conditions": conditions_out,
+            }
+        elif response.status_code == 404:
+            # 项目在 SonarQube 中不存在
+            error_msg = f"SonarQube 中找不到项目: {project_key}"
+            db_scan.result = 'failed'
+            db_scan.error_message = error_msg
+            db_scan.scan_time = datetime.now()
+            db.add(models.CodeScanResult(
+                scan_id=db_scan.id,
+                status='failed',
+                error_message=error_msg,
+            ))
+            db.commit()
+            raise HTTPException(
+                status_code=404, 
+                detail=f"{error_msg}，请先在 SonarQube 中执行扫描"
+            )
+        elif response.status_code == 401:
+            error_msg = "SonarQube 认证失败，请检查 Token"
+            db_scan.result = 'failed'
+            db_scan.error_message = error_msg
+            db_scan.scan_time = datetime.now()
+            db.add(models.CodeScanResult(
+                scan_id=db_scan.id,
+                status='failed',
+                error_message=error_msg,
+            ))
+            db.commit()
+            raise HTTPException(status_code=401, detail=error_msg)
+        else:
+            error_msg = f"SonarQube API 调用失败: {response.status_code}"
+            db_scan.result = 'failed'
+            db_scan.error_message = error_msg
+            db_scan.scan_time = datetime.now()
+            db.add(models.CodeScanResult(
+                scan_id=db_scan.id,
+                status='failed',
+                error_message=error_msg,
+            ))
+            db.commit()
+            raise HTTPException(
+                status_code=500, 
+                detail=f"{error_msg} - {response.text}"
+            )
+    except requests.exceptions.Timeout:
+        error_msg = "SonarQube API 请求超时"
+        db_scan.result = 'failed'
+        db_scan.error_message = error_msg
+        db_scan.scan_time = datetime.now()
+        db.add(models.CodeScanResult(
+            scan_id=db_scan.id,
+            status='failed',
+            error_message=error_msg,
+        ))
+        db.commit()
+        raise HTTPException(status_code=504, detail=error_msg)
+    except requests.exceptions.ConnectionError:
+        error_msg = f"无法连接到 SonarQube: {sonar_host}"
+        db_scan.result = 'failed'
+        db_scan.error_message = error_msg
+        db_scan.scan_time = datetime.now()
+        db.add(models.CodeScanResult(
+            scan_id=db_scan.id,
+            status='failed',
+            error_message=error_msg,
+        ))
+        db.commit()
+        raise HTTPException(status_code=503, detail=error_msg)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"查询 SonarQube 状态失败: {str(e)}"
+        db_scan.result = 'failed'
+        db_scan.error_message = error_msg
+        db_scan.scan_time = datetime.now()
+        db.add(models.CodeScanResult(
+            scan_id=db_scan.id,
+            status='failed',
+            error_message=error_msg,
+        ))
+        db.commit()
+        raise HTTPException(status_code=500, detail=error_msg)
 
-@app.get("/api/code-scans/{scan_id}/result", response_model=schemas.CodeScanResult)
-def get_code_scan_result(
+@app.get("/api/code-scans/{scan_id}/results")
+def get_code_scan_results(
     scan_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """获取扫描结果"""
-    scan = db.query(models.CodeScan).options(
-        joinedload(models.CodeScan.project)
-    ).filter(models.CodeScan.id == scan_id).first()
-    if not scan:
+    """获取代码扫描历史记录"""
+    db_scan = db.query(models.CodeScan).filter(models.CodeScan.id == scan_id).first()
+    if not db_scan:
+        raise HTTPException(status_code=404, detail="扫描任务不存在")
+
+    histories = (
+        db.query(models.CodeScanResult)
+        .filter(models.CodeScanResult.scan_id == scan_id)
+        .order_by(models.CodeScanResult.created_at.desc())
+        .all()
+    )
+
+    return [
+        {
+            "id": h.id,
+            "status": h.status,
+            "error_message": h.error_message,
+            "created_at": h.created_at.isoformat() if h.created_at else None,
+            "updated_at": h.updated_at.isoformat() if h.updated_at else None,
+        }
+        for h in histories
+    ]
+
+@app.get("/api/code-scans/{scan_id}/status")
+def get_code_scan_status(
+    scan_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取扫描任务的最新状态（从 SonarQube 实时查询）"""
+    db_scan = db.query(models.CodeScan).filter(models.CodeScan.id == scan_id).first()
+    if not db_scan:
         raise HTTPException(status_code=404, detail="扫描任务不存在")
     
-    # 检查权限
-    user = db.query(models.User).filter(models.User.id == current_user.id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="用户不存在")
-    check_project_member_permission(user, scan.project, "查看扫描结果")
+    if not db_scan.sonar_host:
+        return {
+            "result": db_scan.result,
+            "scan_time": db_scan.scan_time.isoformat() if db_scan.scan_time else None,
+            "message": "未配置 Sonar Host"
+        }
     
-    # 获取最新的扫描结果
-    result = db.query(models.CodeScanResult).filter(
-        models.CodeScanResult.scan_id == scan_id
-    ).order_by(models.CodeScanResult.created_at.desc()).first()
+    project_key = db_scan.sonar_project_key or f"{db_scan.project_name}:{db_scan.branch}"
+    sonar_host = db_scan.sonar_host.rstrip('/')
+    api_url = f"{sonar_host}/api/qualitygates/project_status"
     
-    if not result:
-        raise HTTPException(status_code=404, detail="扫描结果不存在")
-    
-    return result
+    try:
+        headers = {}
+        if db_scan.sonar_login:
+            auth_string = f"{db_scan.sonar_login}:"
+            auth_bytes = base64.b64encode(auth_string.encode()).decode()
+            headers['Authorization'] = f'Basic {auth_bytes}'
+        
+        response = requests.get(
+            api_url,
+            params={'projectKey': project_key},
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            status = data.get('projectStatus', {}).get('status', '')
+            new_result = 'passed' if status == 'OK' else 'failed'
+            if db_scan.result != new_result:
+                db_scan.result = new_result
+                db_scan.scan_time = datetime.now()
+                db.commit()
+            return {
+                "result": new_result,
+                "scan_time": db_scan.scan_time.isoformat() if db_scan.scan_time else None,
+                "sonar_status": status
+            }
+        elif response.status_code == 404:
+            return {
+                "result": None,
+                "scan_time": None,
+                "message": f"SonarQube 中找不到项目: {project_key}"
+            }
+        else:
+            return {
+                "result": db_scan.result,
+                "scan_time": db_scan.scan_time.isoformat() if db_scan.scan_time else None,
+                "message": f"SonarQube API 调用失败: {response.status_code}"
+            }
+    except Exception as e:
+        return {
+            "result": db_scan.result,
+            "scan_time": db_scan.scan_time.isoformat() if db_scan.scan_time else None,
+            "message": f"查询失败: {str(e)}"
+        }
 
 # ==================== 接口端点管理 ====================
 
@@ -4596,6 +4735,11 @@ def execute_api_flow(
         fail_action = flow.executionConfig.get("failAction", "stop")
     if not fail_action:
         fail_action = "stop"
+    
+    # 获取步骤间延迟时间（毫秒）
+    step_delay = request.delay or 0
+    if step_delay > 0:
+        print(f"🔍 步骤间延迟设置为: {step_delay}ms")
 
     # 重要：每个步骤的参数和执行都是完全独立的
     # 即使多个步骤使用相同的接口（endpoint_id），每个步骤也有自己独立的参数
@@ -4858,6 +5002,11 @@ def execute_api_flow(
                 # 停止执行
                 break
             # 如果 fail_action == "continue"，继续执行下一个步骤
+        
+        # 步骤间延迟（不是最后一个步骤时）
+        if step_delay > 0 and idx < len(enabled_steps) - 1:
+            print(f"🔍 步骤 {idx+1} 执行完成，延迟 {step_delay}ms 后执行下一步骤")
+            time.sleep(step_delay / 1000.0)  # 转换为秒
 
     return {
         "success": overall_success,
@@ -5743,6 +5892,12 @@ def execute_test_task(
                             if test_data and test_data.headers:
                                 headers.update(test_data.headers)
                             
+                            # 应用 Header 替换
+                            if request.header_replacements:
+                                for replacement in request.header_replacements:
+                                    if replacement.key and replacement.value:
+                                        headers[replacement.key] = replacement.value
+                            
                             query_params = {}
                             if test_data and test_data.query_params:
                                 query_params = test_data.query_params
@@ -5756,6 +5911,20 @@ def execute_test_task(
                             assertions_list = []
                             if test_data and test_data.assertions:
                                 assertions_list = test_data.assertions
+                            
+                            # 应用断言替换（如果有替换配置，则使用替换的断言）
+                            if request.assertion_replacements:
+                                assertions_list = [
+                                    {
+                                        "type": a.type,
+                                        "target": a.target,
+                                        "operator": a.operator,
+                                        "expected": a.expected
+                                    }
+                                    for a in request.assertion_replacements
+                                    if a.type and a.operator and a.expected is not None
+                                ]
+                                print(f"🔍 测试任务断言替换: {assertions_list}")
                             
                             # 执行请求
                             import requests
@@ -5804,7 +5973,6 @@ def execute_test_task(
                                 
                                 api_result["status_code"] = response.status_code
                                 api_result["execution_time"] = response_time
-                                api_result["success"] = response.status_code < 400
                                 
                                 # 更新响应详情
                                 api_result["details"].update({
@@ -5814,11 +5982,83 @@ def execute_test_task(
                                     "response_time": response_time
                                 })
                                 
-                                if not api_result["success"]:
-                                    api_result["error_message"] = f"HTTP {response.status_code}: {response_body[:200] if response_body else '无响应内容'}"
-                                    failed_count += 1
+                                # 验证断言
+                                assertion_success = True
+                                assertion_errors = []
+                                
+                                print(f"🔍 开始验证断言，断言数量: {len(assertions_list) if assertions_list else 0}")
+                                
+                                if assertions_list:
+                                    # 尝试解析响应体为 JSON
+                                    json_body = None
+                                    try:
+                                        json_body = response.json()
+                                    except:
+                                        pass
+                                    
+                                    for assertion in assertions_list:
+                                        assertion_type = assertion.get('type')
+                                        operator = assertion.get('operator')
+                                        target = assertion.get('target')
+                                        expected = assertion.get('expected')
+                                        
+                                        if assertion_type == 'status_code':
+                                            # 状态码断言
+                                            actual_value = response.status_code
+                                            if not _check_assertion(actual_value, operator, expected):
+                                                assertion_success = False
+                                                assertion_errors.append(f"状态码断言失败: 期望 {expected}，实际 {actual_value}")
+                                        
+                                        elif assertion_type == 'json_path':
+                                            # JSON路径断言
+                                            if json_body and target:
+                                                actual_value = _extract_json_path(json_body, target)
+                                                print(f"🔍 JSON路径断言: path={target}, expected={expected}, actual={actual_value}, operator={operator}")
+                                                check_result = _check_assertion(actual_value, operator, expected)
+                                                print(f"🔍 断言检查结果: {check_result}")
+                                                if not check_result:
+                                                    assertion_success = False
+                                                    assertion_errors.append(f"JSON路径断言失败: {target} 期望 {expected}，实际 {_format_value_for_display(actual_value)}")
+                                            else:
+                                                assertion_success = False
+                                                assertion_errors.append(f"JSON路径断言失败: 无法提取路径 {target}")
+                                        
+                                        elif assertion_type == 'response_time':
+                                            # 响应时间断言
+                                            actual_value = response_time
+                                            if not _check_assertion(actual_value, operator, expected):
+                                                assertion_success = False
+                                                assertion_errors.append(f"响应时间断言失败: 期望 {expected}ms，实际 {actual_value}ms")
+                                        
+                                        elif assertion_type == 'contains':
+                                            # 包含断言
+                                            if json_body:
+                                                body_str = json.dumps(json_body) if isinstance(json_body, dict) else str(json_body)
+                                                if expected and expected not in body_str:
+                                                    assertion_success = False
+                                                    assertion_errors.append(f"包含断言失败: 响应体中不包含 {expected}")
+                                            else:
+                                                if expected and expected not in str(response_body):
+                                                    assertion_success = False
+                                                    assertion_errors.append(f"包含断言失败: 响应体中不包含 {expected}")
+                                    
+                                    # 记录断言结果
+                                    api_result["details"]["assertion_results"] = assertion_errors if assertion_errors else ["所有断言通过"]
+                                    api_result["success"] = assertion_success
+                                    
+                                    if not assertion_success:
+                                        api_result["error_message"] = "; ".join(assertion_errors)
+                                        failed_count += 1
+                                    else:
+                                        success_count += 1
                                 else:
-                                    success_count += 1
+                                    # 如果没有断言，使用默认逻辑：HTTP 状态码判断
+                                    api_result["success"] = response.status_code < 400
+                                    if not api_result["success"]:
+                                        api_result["error_message"] = f"HTTP {response.status_code}: {response_body[:200] if response_body else '无响应内容'}"
+                                        failed_count += 1
+                                    else:
+                                        success_count += 1
                             
                             except requests.exceptions.Timeout:
                                 response_time = int((time.time() - start_time) * 1000)
@@ -6070,12 +6310,18 @@ def execute_test_task(
                                         except:
                                             step_response_body = str(step_response.content)[:5000] if hasattr(step_response, 'content') else None
                                         
-                                        step_result["success"] = step_response.status_code < 400
                                         step_result["execution_time"] = step_response_time
                                         step_result["status_code"] = step_response.status_code
                                         
-                                        # 添加断言信息（即使没有断言也要记录）
+                                        # 获取断言信息
                                         step_assertions_list = step.get("assertions") or []
+                                        
+                                        # 解析响应体为JSON（用于断言验证）
+                                        step_json_body = None
+                                        try:
+                                            step_json_body = step_response.json()
+                                        except:
+                                            step_json_body = None
                                         
                                         step_result["details"].update({
                                             "response_status": step_response.status_code,
@@ -6085,12 +6331,96 @@ def execute_test_task(
                                             "request_assertions": step_assertions_list
                                         })
                                         
-                                        if step_response.status_code >= 400:
-                                            step_result["error_message"] = f"HTTP {step_response.status_code}: {step_response_body[:200] if step_response_body else '无响应内容'}"
-                                            flow_success = False
-                                            flow_error = f"步骤 {step_idx + 1} 失败: HTTP {step_response.status_code}"
-                                            if fail_action == "stop":
-                                                break
+                                        # 验证断言
+                                        if step_assertions_list and len(step_assertions_list) > 0:
+                                            step_assertion_success = True
+                                            step_assertion_errors = []
+                                            
+                                            for assertion in step_assertions_list:
+                                                assertion_type = assertion.get('type')
+                                                operator = assertion.get('operator')
+                                                target = assertion.get('target')
+                                                expected = assertion.get('expected')
+                                                
+                                                # 跳过无效的断言
+                                                if not assertion_type or not operator:
+                                                    continue
+                                                
+                                                if assertion_type == 'status_code':
+                                                    # 状态码断言
+                                                    actual_value = step_response.status_code
+                                                    if expected is None or expected == '':
+                                                        step_assertion_success = False
+                                                        step_assertion_errors.append(f"状态码断言失败: 期望值不能为空")
+                                                        continue
+                                                    expected_str = str(expected).strip()
+                                                    if not _check_assertion(actual_value, operator, expected_str):
+                                                        step_assertion_success = False
+                                                        step_assertion_errors.append(f"状态码断言失败: 期望 {expected_str}，实际 {actual_value}")
+                                                
+                                                elif assertion_type == 'json_path':
+                                                    # JSON路径断言
+                                                    if step_json_body and target:
+                                                        # 渲染 expected 值（处理变量替换）
+                                                        if expected:
+                                                            try:
+                                                                expected_rendered = _render_template(expected, context)
+                                                                if isinstance(expected_rendered, str) and expected_rendered.startswith('"') and expected_rendered.endswith('"'):
+                                                                    expected_rendered = expected_rendered[1:-1]
+                                                                expected = expected_rendered
+                                                            except Exception as e:
+                                                                print(f"🔍 渲染 expected 值失败: {e}")
+                                                        
+                                                        actual_value = _extract_json_path(step_json_body, target)
+                                                        print(f"🔍 流程JSON路径断言: path={target}, expected={expected}, actual={actual_value}, operator={operator}")
+                                                        
+                                                        if not _check_assertion(actual_value, operator, expected):
+                                                            step_assertion_success = False
+                                                            step_assertion_errors.append(f"JSON路径断言失败: {target} 期望 {expected}，实际 {_format_value_for_display(actual_value)}")
+                                                    else:
+                                                        step_assertion_success = False
+                                                        step_assertion_errors.append(f"JSON路径断言失败: 无法提取路径 {target}")
+                                                
+                                                elif assertion_type == 'response_time':
+                                                    # 响应时间断言
+                                                    actual_value = step_response_time
+                                                    if not _check_assertion(actual_value, operator, expected):
+                                                        step_assertion_success = False
+                                                        step_assertion_errors.append(f"响应时间断言失败: 期望 {expected}ms，实际 {actual_value}ms")
+                                                
+                                                elif assertion_type == 'contains':
+                                                    # 包含断言
+                                                    if step_json_body:
+                                                        body_str = json.dumps(step_json_body) if isinstance(step_json_body, dict) else str(step_json_body)
+                                                        if expected and expected not in body_str:
+                                                            step_assertion_success = False
+                                                            step_assertion_errors.append(f"包含断言失败: 响应体中不包含 {expected}")
+                                                    else:
+                                                        if expected and expected not in str(step_response_body):
+                                                            step_assertion_success = False
+                                                            step_assertion_errors.append(f"包含断言失败: 响应体中不包含 {expected}")
+                                            
+                                            # 设置步骤成功状态
+                                            step_result["success"] = step_assertion_success
+                                            step_result["details"]["assertion_results"] = step_assertion_errors if step_assertion_errors else ["所有断言通过"]
+                                            
+                                            if not step_assertion_success:
+                                                step_result["error_message"] = "; ".join(step_assertion_errors)
+                                                flow_success = False
+                                                flow_error = f"步骤 {step_idx + 1} 断言失败: {'; '.join(step_assertion_errors)}"
+                                                if fail_action == "stop":
+                                                    flow_result["details"]["steps"].append(step_result)
+                                                    break
+                                        else:
+                                            # 没有断言，使用HTTP状态码判断
+                                            step_result["success"] = step_response.status_code < 400
+                                            if step_response.status_code >= 400:
+                                                step_result["error_message"] = f"HTTP {step_response.status_code}: {step_response_body[:200] if step_response_body else '无响应内容'}"
+                                                flow_success = False
+                                                flow_error = f"步骤 {step_idx + 1} 失败: HTTP {step_response.status_code}"
+                                                if fail_action == "stop":
+                                                    flow_result["details"]["steps"].append(step_result)
+                                                    break
                                     
                                     except requests.exceptions.Timeout:
                                         step_response_time = int((time.time() - step_start_time) * 1000)
@@ -6320,20 +6650,49 @@ def execute_test_task(
     return execution
 
 
-@app.get("/api/test-tasks/{task_id}/executions", response_model=List[schemas.TestTaskExecution])
+@app.get("/api/test-tasks/{task_id}/executions", response_model=List[schemas.TestTaskExecutionSummary])
 def get_test_task_executions(
     task_id: int,
+    limit: int = 20,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """获取测试任务执行记录列表"""
+    """获取测试任务执行记录列表（不包含详细结果，仅返回摘要信息）"""
     require_permission(current_user.role, "apitest", "read")
     
-    executions = db.query(models.TestTaskExecution).filter(
+    # 只查询需要的列，排除 execution_results 大字段以提高性能
+    executions = db.query(
+        models.TestTaskExecution.id,
+        models.TestTaskExecution.task_id,
+        models.TestTaskExecution.environment_id,
+        models.TestTaskExecution.status,
+        models.TestTaskExecution.total_count,
+        models.TestTaskExecution.success_count,
+        models.TestTaskExecution.failed_count,
+        models.TestTaskExecution.error_message,
+        models.TestTaskExecution.started_at,
+        models.TestTaskExecution.completed_at
+    ).filter(
         models.TestTaskExecution.task_id == task_id
-    ).order_by(models.TestTaskExecution.started_at.desc()).all()
+    ).order_by(models.TestTaskExecution.started_at.desc()).limit(limit).all()
     
-    return executions
+    # 将查询结果转换为字典列表
+    result = []
+    for execution in executions:
+        result.append({
+            "id": execution.id,
+            "task_id": execution.task_id,
+            "environment_id": execution.environment_id,
+            "status": execution.status,
+            "total_count": execution.total_count,
+            "success_count": execution.success_count,
+            "failed_count": execution.failed_count,
+            "error_message": execution.error_message,
+            "started_at": execution.started_at,
+            "completed_at": execution.completed_at
+        })
+    
+    return result
 
 
 @app.get("/api/test-tasks/{task_id}/executions/{execution_id}", response_model=schemas.TestTaskExecution)
@@ -6355,6 +6714,326 @@ def get_test_task_execution(
         raise HTTPException(status_code=404, detail="执行记录不存在")
     
     return execution
+
+
+# ==================== 测试文件管理 ====================
+
+# 文件上传目录配置
+# 优先使用环境变量 UPLOAD_DIR，否则使用默认路径
+# Docker 部署时通过环境变量指定持久化卷路径（如 /opt/bug-uploads）
+#
+# 目录结构（按文件类型和名称组织）：
+#   uploads/ 或 /opt/bug-uploads/
+#     ├── local/                    # 本地上传的文件
+#     │   ├── 测试数据1/            # 文件管理中设置的"名称"
+#     │   │   └── a1b2c3d4.json     # 实际文件（UUID命名）
+#     │   ├── 用户信息/
+#     │   │   └── x9y8z7w6.csv
+#     │   └── ...
+#     └── flow/                     # 流程导出的文件
+#         ├── 登录流程/
+#         │   └── f1e2d3c4.json
+#         └── ...
+#
+UPLOAD_BASE_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "uploads"))
+UPLOAD_DIR_LOCAL = os.path.join(UPLOAD_BASE_DIR, "local")
+UPLOAD_DIR_FLOW = os.path.join(UPLOAD_BASE_DIR, "flow")
+os.makedirs(UPLOAD_DIR_LOCAL, exist_ok=True)
+os.makedirs(UPLOAD_DIR_FLOW, exist_ok=True)
+
+# Bug 图片存储目录配置
+# Docker 部署时映射到 /opt/bug-images，本地开发时使用 backend/images
+# 目录结构：
+#   images/ 或 /opt/bug-images/
+#     ├── BUG-001/                  # 以缺陷编号为文件夹名称
+#     │   ├── a1b2c3d4.png
+#     │   └── x9y8z7w6.jpg
+#     ├── BUG-002/
+#     │   └── ...
+#     └── ...
+#
+BUG_IMAGE_DIR = os.environ.get("BUG_IMAGE_DIR", os.path.join(os.path.dirname(__file__), "images"))
+os.makedirs(BUG_IMAGE_DIR, exist_ok=True)
+
+def get_upload_dir(file_type: str) -> str:
+    """根据文件类型获取对应的基础上传目录"""
+    if file_type == "flow":
+        return UPLOAD_DIR_FLOW
+    return UPLOAD_DIR_LOCAL
+
+@app.get("/api/test-files", response_model=schemas.TestFileList)
+def get_test_files(
+    keyword: Optional[str] = None,
+    file_type: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取测试文件列表"""
+    require_permission(current_user.role, "apitest", "read")
+    
+    query = db.query(models.TestFile)
+    
+    if keyword:
+        query = query.filter(
+            (models.TestFile.name.contains(keyword)) |
+            (models.TestFile.description.contains(keyword)) |
+            (models.TestFile.file_name.contains(keyword))
+        )
+    
+    if file_type:
+        query = query.filter(models.TestFile.file_type == file_type)
+    
+    total = query.count()
+    items = query.order_by(models.TestFile.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    
+    return {"items": items, "total": total}
+
+@app.get("/api/test-files/{file_id}", response_model=schemas.TestFile)
+def get_test_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取单个测试文件详情"""
+    require_permission(current_user.role, "apitest", "read")
+    
+    test_file = db.query(models.TestFile).filter(models.TestFile.id == file_id).first()
+    if not test_file:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    return test_file
+
+@app.post("/api/test-files", response_model=schemas.TestFile)
+async def create_test_file(
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    file_type: str = Form("local"),
+    file: Optional[UploadFile] = File(None),
+    file_content: Optional[str] = Form(None),
+    flow_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """创建测试文件（上传本地文件或保存流程导出）
+    
+    文件存储目录结构：
+    - local/{名称}/: 本地上传的文件（.json, .txt, .csv, .xml 等）
+    - flow/{名称}/: 流程导出的文件（.json）
+    
+    例如：
+    - local/测试数据1/a1b2c3d4.json
+    - flow/登录流程/f1e2d3c4.json
+    """
+    require_permission(current_user.role, "apitest", "write")
+    
+    import uuid
+    import re
+    
+    file_path = None
+    file_size = None
+    mime_type = None
+    actual_file_name = None
+    content_json = None
+    
+    # 获取对应类型的上传目录
+    base_upload_dir = get_upload_dir(file_type)
+    
+    # 清理文件夹名称（移除不安全字符）
+    safe_folder_name = re.sub(r'[<>:"/\\|?*]', '_', name.strip())
+    if not safe_folder_name:
+        safe_folder_name = "unnamed"
+    
+    # 创建以"名称"命名的子文件夹
+    upload_dir = os.path.join(base_upload_dir, safe_folder_name)
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    if file_type == "local" and file:
+        # 本地上传文件
+        actual_file_name = file.filename
+        mime_type = file.content_type
+        
+        # 生成唯一文件名，保留原始扩展名
+        ext = os.path.splitext(file.filename)[1] if file.filename else ""
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(upload_dir, unique_name)
+        
+        # 保存文件到文件系统
+        content = await file.read()
+        file_size = len(content)
+        with open(file_path, "wb") as f:
+            f.write(content)
+            
+    elif file_type == "flow" and file_content:
+        # 流程导出内容 - 同时保存到文件系统和数据库
+        actual_file_name = f"{name}.json"
+        mime_type = "application/json"
+        
+        try:
+            content_json = json.loads(file_content)
+            file_size = len(file_content.encode('utf-8'))
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="无效的JSON内容")
+        
+        # 生成唯一文件名并保存到文件系统
+        unique_name = f"{uuid.uuid4().hex}.json"
+        file_path = os.path.join(upload_dir, unique_name)
+        
+        # 格式化 JSON 并保存
+        formatted_content = json.dumps(content_json, ensure_ascii=False, indent=2)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(formatted_content)
+    else:
+        raise HTTPException(status_code=400, detail="请提供文件或流程内容")
+    
+    test_file = models.TestFile(
+        name=name,
+        description=description,
+        file_type=file_type,
+        file_name=actual_file_name,
+        file_path=file_path,
+        file_content=content_json,  # 流程导出同时保存到数据库（便于快速查询）
+        file_size=file_size,
+        mime_type=mime_type,
+        flow_id=flow_id,
+        created_by=current_user.id
+    )
+    
+    db.add(test_file)
+    db.commit()
+    db.refresh(test_file)
+    
+    return test_file
+
+@app.put("/api/test-files/{file_id}", response_model=schemas.TestFile)
+def update_test_file(
+    file_id: int,
+    request: schemas.TestFileUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """更新测试文件信息"""
+    require_permission(current_user.role, "apitest", "write")
+    
+    test_file = db.query(models.TestFile).filter(models.TestFile.id == file_id).first()
+    if not test_file:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    if request.name is not None:
+        test_file.name = request.name
+    if request.description is not None:
+        test_file.description = request.description
+    
+    db.commit()
+    db.refresh(test_file)
+    
+    return test_file
+
+@app.delete("/api/test-files/{file_id}")
+def delete_test_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """删除测试文件"""
+    require_permission(current_user.role, "apitest", "write")
+    
+    test_file = db.query(models.TestFile).filter(models.TestFile.id == file_id).first()
+    if not test_file:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    # 删除物理文件和空文件夹
+    if test_file.file_path and os.path.exists(test_file.file_path):
+        try:
+            # 获取文件所在目录
+            file_dir = os.path.dirname(test_file.file_path)
+            
+            # 删除文件
+            os.remove(test_file.file_path)
+            
+            # 如果文件夹为空，删除文件夹
+            if os.path.isdir(file_dir) and not os.listdir(file_dir):
+                os.rmdir(file_dir)
+        except Exception as e:
+            print(f"删除文件失败: {e}")
+    
+    db.delete(test_file)
+    db.commit()
+    
+    return {"message": "删除成功"}
+
+@app.get("/api/test-files/{file_id}/download")
+def download_test_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """下载测试文件
+    
+    优先从文件系统读取，如果文件不存在则尝试从数据库读取（兼容旧数据）
+    """
+    require_permission(current_user.role, "apitest", "read")
+    
+    test_file = db.query(models.TestFile).filter(models.TestFile.id == file_id).first()
+    if not test_file:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    from fastapi.responses import FileResponse, Response
+    
+    # 优先从文件系统读取
+    if test_file.file_path and os.path.exists(test_file.file_path):
+        return FileResponse(
+            path=test_file.file_path,
+            filename=test_file.file_name,
+            media_type=test_file.mime_type or "application/octet-stream"
+        )
+    
+    # 兼容旧数据：如果文件系统中没有，尝试从数据库读取（仅流程导出类型）
+    if test_file.file_type == "flow" and test_file.file_content:
+        content = json.dumps(test_file.file_content, ensure_ascii=False, indent=2)
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{test_file.file_name}"'
+            }
+        )
+    
+    raise HTTPException(status_code=404, detail="文件内容不存在")
+
+@app.get("/api/test-files/{file_id}/content")
+def get_test_file_content(
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """获取测试文件内容（用于导入）
+    
+    优先从文件系统读取，如果文件不存在则尝试从数据库读取（兼容旧数据）
+    """
+    require_permission(current_user.role, "apitest", "read")
+    
+    test_file = db.query(models.TestFile).filter(models.TestFile.id == file_id).first()
+    if not test_file:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    # 优先从文件系统读取
+    if test_file.file_path and os.path.exists(test_file.file_path):
+        try:
+            with open(test_file.file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                return json.loads(content)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="文件内容不是有效的JSON格式")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
+    
+    # 兼容旧数据：如果文件系统中没有，尝试从数据库读取（仅流程导出类型）
+    if test_file.file_type == "flow" and test_file.file_content:
+        return test_file.file_content
+    
+    raise HTTPException(status_code=404, detail="文件内容不存在")
 
 
 # ==================== 健康检查 ====================

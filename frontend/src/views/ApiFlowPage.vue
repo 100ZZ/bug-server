@@ -79,9 +79,9 @@
         </el-table-column>
         <el-table-column label="接口数量" width="120" align="center">
           <template #default="{ row }">
-            <el-button link size="small" class="endpoint-count-btn" @click="showFlowEndpoints(row)">
+            <span class="endpoint-count-text" @click="showFlowEndpoints(row)">
               {{ row.steps?.length || 0 }}
-            </el-button>
+            </span>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180" align="center" show-overflow-tooltip>
@@ -140,7 +140,7 @@
                 <el-icon><Delete /></el-icon>
                 清空
               </el-button>
-              <el-button @click="handleExportFlow" class="export-btn">
+              <el-button @click="showExportDialog" class="export-btn">
                 <el-icon><Download /></el-icon>
                 导出
               </el-button>
@@ -367,6 +367,10 @@
               </div>
             </div>
             <div class="variable-actions">
+              <el-button v-if="localVariables.length === 0" type="primary" @click="addLocalVariable" class="white-text-btn">
+                <el-icon><Plus /></el-icon>
+                新增变量
+              </el-button>
               <el-button type="success" @click="saveLocalVariables" class="white-text-btn">保存</el-button>
             </div>
           </div>
@@ -479,8 +483,7 @@
                     <el-input
                       :value="item.request_headers ? JSON.stringify(item.request_headers, null, 2) : '{\n\n}'"
                       type="textarea"
-                      class="param-textarea"
-                      :autosize="{ minRows: 12, maxRows: 30 }"
+                      class="param-textarea param-textarea-fixed"
                       readonly
                     />
                   </el-tab-pane>
@@ -488,8 +491,7 @@
                     <el-input
                       :value="item.request_query_params ? JSON.stringify(item.request_query_params, null, 2) : '{\n\n}'"
                       type="textarea"
-                      class="param-textarea"
-                      :autosize="{ minRows: 12, maxRows: 30 }"
+                      class="param-textarea param-textarea-fixed"
                       readonly
                     />
                   </el-tab-pane>
@@ -497,8 +499,7 @@
                     <el-input
                       :value="item.request_body ? formatResponseBody(item.request_body) : '{\n\n}'"
                       type="textarea"
-                      class="param-textarea"
-                      :autosize="{ minRows: 15, maxRows: 35 }"
+                      class="param-textarea param-textarea-fixed"
                       readonly
                     />
                   </el-tab-pane>
@@ -506,8 +507,7 @@
                     <el-input
                       :value="item.request_path_params ? JSON.stringify(item.request_path_params, null, 2) : '{\n\n}'"
                       type="textarea"
-                      class="param-textarea"
-                      :autosize="{ minRows: 12, maxRows: 30 }"
+                      class="param-textarea param-textarea-fixed"
                       readonly
                     />
                   </el-tab-pane>
@@ -626,33 +626,76 @@
       </el-drawer>
 
     <!-- 接口列表对话框 -->
-    <el-dialog v-model="showEndpointsDialog" title="接口列表" width="800px" :close-on-click-modal="true">
-      <div v-if="selectedFlowEndpoints && selectedFlowEndpoints.length > 0">
-        <el-table :data="selectedFlowEndpoints" stripe style="width: 100%">
-          <el-table-column label="编号" width="80" type="index" :index="(index: number) => index + 1" />
-          <el-table-column prop="method" label="方法" width="100">
-            <template #default="{ row }">
-              <el-tag :type="getMethodTag(row.method)" size="small">{{ row.method }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="path" label="路径" />
-          <el-table-column prop="name" label="接口名称" />
-        </el-table>
+    <el-dialog v-model="showEndpointsDialog" width="900px" align-center :show-close="true" :close-on-click-modal="true" class="endpoints-dialog-centered">
+      <template #header>
+        <div class="dialog-header">
+          <span class="dialog-title">接口列表</span>
+          <span class="dialog-description">当前流程包含的所有接口，按执行顺序排列</span>
+        </div>
+      </template>
+      <el-table :data="paginatedFlowEndpoints" border>
+        <el-table-column label="编号" width="80" align="center">
+          <template #default="{ $index }">
+            {{ (endpointsDialogPage - 1) * endpointsDialogPageSize + $index + 1 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="method" label="方法" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="getMethodTag(row.method)" size="small">{{ row.method }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="path" label="路径" show-overflow-tooltip />
+        <el-table-column prop="name" label="接口名称" show-overflow-tooltip />
+      </el-table>
+      <div v-if="selectedFlowEndpoints.length > 0" style="margin-top: 16px; text-align: right;">
+        <el-pagination
+          v-model:current-page="endpointsDialogPage"
+          v-model:page-size="endpointsDialogPageSize"
+          :page-sizes="[10]"
+          layout="prev, pager, next, ->, total"
+          :total="selectedFlowEndpoints.length"
+          small
+        />
       </div>
-      <div v-else>
-        <el-empty description="暂无接口" />
-      </div>
+    </el-dialog>
+
+    <!-- 导出流程对话框 -->
+    <el-dialog v-model="showExportDialogVisible" width="500px" :close-on-click-modal="true">
+      <template #header>
+        <div class="dialog-header">
+          <span class="dialog-title">导出流程</span>
+          <span class="dialog-description">选择导出方式：保存到本地或文件管理</span>
+        </div>
+      </template>
+      <el-form :model="exportForm" label-width="100px">
+        <el-form-item label="文件名称" required>
+          <el-input v-model="exportForm.name" placeholder="请输入文件名称" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="exportForm.description" type="textarea" :rows="2" placeholder="请输入描述（可选）" />
+        </el-form-item>
+        <el-form-item label="保存方式">
+          <el-radio-group v-model="exportForm.saveType">
+            <el-radio label="local">保存到本地</el-radio>
+            <el-radio label="fileManage">保存到文件管理</el-radio>
+            <el-radio label="both">同时保存</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button @click="showEndpointsDialog = false">关闭</el-button>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <el-button @click="showExportDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="exporting" @click="handleExportFlow">确认导出</el-button>
+        </div>
       </template>
     </el-dialog>
 
     <!-- 导入流程对话框 -->
-    <el-dialog v-model="showImportDialog" width="600px" :close-on-click-modal="true" @closed="clearImportData">
+    <el-dialog v-model="showImportDialog" width="1000px" :close-on-click-modal="true" @closed="clearImportData">
       <template #header>
         <div class="dialog-header">
           <span class="dialog-title">导入流程</span>
-          <span class="dialog-description">可以从文件或数据库导出记录中导入流程数据，支持导入流程配置、接口步骤和局部变量</span>
+          <span class="dialog-description">可以从文件或文件管理中导入流程数据</span>
         </div>
       </template>
       <el-tabs v-model="importTab">
@@ -690,28 +733,52 @@
             </div>
           </div>
         </el-tab-pane>
-        <el-tab-pane label="从数据库导入" name="database">
-          <div v-if="flowExports.length === 0" style="text-align: center; padding: 40px;">
-            <el-empty description="该流程暂无导出记录" />
+        <el-tab-pane label="从文件管理导入" name="fileManage">
+          <div style="margin-bottom: 12px;">
+            <el-input
+              v-model="fileManageKeyword"
+              placeholder="搜索文件名称"
+              clearable
+              style="width: 200px; margin-right: 12px;"
+              @keyup.enter="loadTestFilesForImport"
+            />
+            <el-button @click="loadTestFilesForImport">搜索</el-button>
+          </div>
+          <div v-if="testFilesForImport.length === 0" style="text-align: center; padding: 40px;">
+            <el-empty description="暂无可导入的文件" />
           </div>
           <div v-else>
-            <el-table :data="flowExports" style="width: 100%" max-height="400">
-              <el-table-column prop="name" label="导出名称" min-width="200" />
-              <el-table-column prop="created_at" label="导出时间" width="180">
+            <el-table :data="paginatedTestFiles" style="width: 100%" table-layout="fixed" max-height="400" v-loading="loadingTestFiles">
+              <el-table-column prop="name" label="文件名称" min-width="180" align="center" show-overflow-tooltip />
+              <el-table-column prop="description" label="描述" min-width="200" align="center" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.description || '-' }}</template>
+              </el-table-column>
+              <el-table-column prop="file_type" label="类型" width="80" align="center">
                 <template #default="{ row }">
-                  {{ new Date(row.created_at).toLocaleString() }}
+                  <el-tag :type="row.file_type === 'flow' ? 'success' : 'primary'" size="small">
+                    {{ row.file_type === 'flow' ? '流程' : '本地' }}
+                  </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="260" fixed="right">
+              <el-table-column label="操作" width="260" align="center" fixed="right">
                 <template #default="{ row }">
                   <div class="table-actions">
-                    <el-button link type="primary" @click="doImportFlow(row.id, true)">导入为新流程</el-button>
-                    <el-button v-if="editingFlowId" link type="primary" @click="doImportFlow(row.id, false)">导入到当前</el-button>
-                    <el-button link type="danger" @click="doDeleteExport(row.id)">删除</el-button>
+                    <el-button link type="primary" @click="doImportFromFileManage(row.id, true)">导入为新流程</el-button>
+                    <el-button v-if="editingFlowId" link type="primary" @click="doImportFromFileManage(row.id, false)">导入到当前流程</el-button>
                   </div>
                 </template>
               </el-table-column>
             </el-table>
+            <div style="margin-top: 12px; text-align: right;">
+              <el-pagination
+                v-model:current-page="importFilePage"
+                v-model:page-size="importFilePageSize"
+                :page-sizes="[10]"
+                layout="prev, pager, next, ->, total"
+                :total="testFilesForImport.length"
+                small
+              />
+            </div>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -777,7 +844,8 @@
     </el-dialog>
 
     <!-- 编辑执行链接口抽屉 -->
-    <el-drawer v-model="stepEditDrawerVisible" :title="`编辑接口 #${editingStepIndex + 1}${flowForm.steps.length > 0 ? ` / ${flowForm.steps.length}` : ''}`" size="80%" :close-on-click-modal="true">
+    <el-drawer v-model="stepEditDrawerVisible" :title="`编辑接口 #${editingStepIndex + 1}${flowForm.steps.length > 0 ? ` / ${flowForm.steps.length}` : ''}`" size="75%" :close-on-click-modal="true">
+      
       <div v-if="editingStepIndex >= 0 && editingStep" class="step-edit-container">
         <div class="step-edit-content">
           <!-- 左侧：请求参数 -->
@@ -828,13 +896,49 @@
                 </el-icon>
               </el-tooltip>
             </el-divider>
+            
+            <!-- 局部变量快捷引用 -->
+            <div v-if="localVariables.length > 0" class="variables-quick-ref">
+              <div class="quick-ref-label">
+                <el-icon><Tickets /></el-icon>
+                <span>局部变量（点击复制）：</span>
+              </div>
+              <div class="quick-ref-buttons">
+                <el-dropdown
+                  v-for="variable in localVariables"
+                  :key="variable.key"
+                  trigger="click"
+                  @command="(command) => copyVariableWithFormat(variable.key, command)"
+                >
+                  <el-button
+                    size="small"
+                    class="variable-quick-btn"
+                  >
+                    ${{ variable.key }}
+                    <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="STR">
+                        <el-icon><DocumentCopy /></el-icon>
+                        STR(${{ variable.key }})
+                      </el-dropdown-item>
+                      <el-dropdown-item command="NUM">
+                        <el-icon><DocumentCopy /></el-icon>
+                        NUM(${{ variable.key }})
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+            </div>
+            
             <el-tabs v-model="activeParamTab" class="param-tabs">
               <el-tab-pane label="Header" name="headers">
                 <el-input
                   v-model="stepHeadersText"
                   type="textarea"
-                  class="param-textarea"
-                  :autosize="{ minRows: 12, maxRows: 30 }"
+                  class="param-textarea param-textarea-fixed"
                   placeholder='JSON格式，例如：{"Authorization": "Bearer token"}'
                 />
               </el-tab-pane>
@@ -842,8 +946,7 @@
                 <el-input
                   v-model="stepQueryParamsText"
                   type="textarea"
-                  class="param-textarea"
-                  :autosize="{ minRows: 12, maxRows: 30 }"
+                  class="param-textarea param-textarea-fixed"
                   placeholder='JSON格式，例如：{"page": 1, "size": 10}'
                 />
               </el-tab-pane>
@@ -851,8 +954,7 @@
                 <el-input
                   v-model="stepBodyText"
                   type="textarea"
-                  class="param-textarea"
-                  :autosize="{ minRows: 15, maxRows: 35 }"
+                  class="param-textarea param-textarea-fixed"
                   placeholder='JSON格式，例如：{"name": "test", "age": 18}'
                 />
               </el-tab-pane>
@@ -860,8 +962,7 @@
                 <el-input
                   v-model="stepPathParamsText"
                   type="textarea"
-                  class="param-textarea"
-                  :autosize="{ minRows: 12, maxRows: 30 }"
+                  class="param-textarea param-textarea-fixed"
                   placeholder='JSON格式，例如：{"id": 123}'
                 />
               </el-tab-pane>
@@ -899,19 +1000,8 @@
                       class="assertion-value"
                       placeholder="期望值，例如：200"
                     />
-                    <el-button
-                      link
-                      @click="addStepAssertion(index)"
-                    >
-                      新增
-                    </el-button>
-                    <el-button
-                      type="danger"
-                      link
-                      @click="removeStepAssertion(index)"
-                    >
-                      删除
-                    </el-button>
+                    <el-button link type="danger" @click="removeStepAssertion(index)">删除</el-button>
+                    <el-button link type="primary" @click="addStepAssertion(index)">新增</el-button>
                   </div>
                 </div>
               </el-tab-pane>
@@ -1004,7 +1094,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, EditPen, VideoPlay, Delete, Plus, ArrowUp, ArrowDown, CopyDocument, Upload, UploadFilled, Download, QuestionFilled, Check, Close, Loading, CircleCheck, CircleClose, View, Hide, Star, StarFilled, Share } from '@element-plus/icons-vue'
+import { Search, EditPen, VideoPlay, Delete, Plus, ArrowUp, ArrowDown, CopyDocument, Upload, UploadFilled, Download, QuestionFilled, Check, Close, Loading, CircleCheck, CircleClose, View, Hide, Star, StarFilled, Share, Tickets, DocumentCopy, InfoFilled } from '@element-plus/icons-vue'
 import * as apitestApi from '../api/apitest'
 import * as projectApi from '../api/projects'
 import { useProjectContext } from '../composables/useProjectContext'
@@ -1117,6 +1207,23 @@ const expandedResultIndices = ref<Set<number>>(new Set())
 // 接口列表对话框
 const showEndpointsDialog = ref(false)
 const selectedFlowEndpoints = ref<ApiEndpoint[]>([])
+const endpointsDialogPage = ref(1)
+const endpointsDialogPageSize = ref(10)
+
+// 分页后的接口列表
+const paginatedFlowEndpoints = computed(() => {
+  const start = (endpointsDialogPage.value - 1) * endpointsDialogPageSize.value
+  return selectedFlowEndpoints.value.slice(start, start + endpointsDialogPageSize.value)
+})
+
+// 导出对话框
+const showExportDialogVisible = ref(false)
+const exporting = ref(false)
+const exportForm = reactive({
+  name: '',
+  description: '',
+  saveType: 'local' as 'local' | 'fileManage' | 'both'
+})
 
 // 导入对话框
 const showImportDialog = ref(false)
@@ -1126,8 +1233,22 @@ const fileUploadRef = ref()
 const importFileData = ref<any>(null)
 const uploadKey = ref(0) // 用于强制重新渲染文件上传组件
 
+// 文件管理导入
+const testFilesForImport = ref<any[]>([])
+const loadingTestFiles = ref(false)
+const fileManageKeyword = ref('')
+const importFilePage = ref(1)
+const importFilePageSize = ref(10)
+
+// 分页后的文件列表
+const paginatedTestFiles = computed(() => {
+  const start = (importFilePage.value - 1) * importFilePageSize.value
+  return testFilesForImport.value.slice(start, start + importFilePageSize.value)
+})
+
 // 编辑执行链接口抽屉
 const stepEditDrawerVisible = ref(false)
+const availableVariablesCollapse = ref(['variables']) // 可用变量折叠面板状态
 const editingStepIndex = ref<number>(-1)
 const editingStep = computed(() => {
   if (editingStepIndex.value >= 0 && flowForm.steps[editingStepIndex.value]) {
@@ -1173,7 +1294,7 @@ const loadFlows = async () => {
     
     flows.value = await apitestApi.getApiFlows(params)
   } catch (error: any) {
-    ElMessage.error(error.message || '加载流程失败')
+    ElMessage.error({ message: error.message || '加载流程失败', duration: 2000 })
   } finally {
     flowLoading.value = false
   }
@@ -1199,13 +1320,13 @@ const handleToggleFavorite = async (row: ApiTestFlow) => {
     const newFavoriteStatus = !row.is_favorite
     await apitestApi.toggleFavoriteFlow(row.id, newFavoriteStatus)
     row.is_favorite = newFavoriteStatus
-    ElMessage.success(newFavoriteStatus ? '已收藏' : '已取消收藏')
+    ElMessage.success({ message: newFavoriteStatus ? '已收藏' : '已取消收藏', duration: 1000 })
     // 如果当前在收藏筛选模式下，取消收藏后需要重新加载列表
     if (flowFilters.showFavorite && !newFavoriteStatus) {
       loadFlows()
     }
   } catch (error: any) {
-    ElMessage.error(error.message || '操作失败')
+    ElMessage.error({ message: error.message || '操作失败', duration: 2000 })
   }
 }
 
@@ -1227,7 +1348,7 @@ const loadProjects = async () => {
       flowFilters.project_id = getCurrentProjectId.value
     }
   } catch (error: any) {
-    ElMessage.error(error.message || '加载项目列表失败')
+    ElMessage.error({ message: error.message || '加载项目列表失败', duration: 2000 })
   }
 }
 
@@ -1236,7 +1357,7 @@ const loadEnvironments = async () => {
   try {
     allEnvironments.value = await apitestApi.getApiEnvironments()
   } catch (error: any) {
-    ElMessage.error(error.message || '加载环境列表失败')
+    ElMessage.error({ message: error.message || '加载环境列表失败', duration: 2000 })
   }
 }
 
@@ -1249,8 +1370,6 @@ const loadFlowVariables = async (flowId: number) => {
       key: v.key,
       value: v.value
     }))
-    // 添加一个空行用于新增
-    localVariables.value.push({ key: '', value: '' })
     // 同时更新全局变量对象（用于向后兼容）
     const vars: Record<string, string> = {}
     variables.forEach(v => {
@@ -1265,8 +1384,6 @@ const loadFlowVariables = async (flowId: number) => {
         key,
         value: String(value)
       }))
-      // 添加一个空行用于新增
-      localVariables.value.push({ key: '', value: '' })
     } else {
       // 默认显示一个空行
       localVariables.value = [{ key: '', value: '' }]
@@ -1368,16 +1485,16 @@ const handleDeleteFlow = async (row: ApiTestFlow) => {
   try {
     await ElMessageBox.confirm('确定删除该流程吗？', '提示', { type: 'warning' })
     await apitestApi.deleteApiFlow(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success({ message: '删除成功', duration: 1000 })
     loadFlows()
   } catch (error: any) {
-    if (error !== 'cancel') ElMessage.error(error.message || '删除失败')
+    if (error !== 'cancel') ElMessage.error({ message: error.message || '删除失败', duration: 2000 })
   }
 }
 
 const handleAddStep = () => {
   if (!stepDraft.endpoint_id) {
-    ElMessage.warning('请选择接口')
+    ElMessage.warning({ message: '请选择接口', duration: 1500 })
     return
   }
   try {
@@ -1404,7 +1521,7 @@ const handleAddStep = () => {
       body_text: ''
     })
   } catch (error) {
-    ElMessage.error('步骤参数格式错误，请检查 JSON')
+    ElMessage.error({ message: '步骤参数格式错误，请检查 JSON', duration: 2000 })
   }
 }
 
@@ -1486,17 +1603,17 @@ const quickAddStep = async (endpoint: ApiEndpoint) => {
     
     flowForm.steps.push(newStep)
     executionStats.total = flowForm.steps.length
-    flowEndpointKeyword.value = '' // 清空搜索框
-    ElMessage.success('已添加到执行链')
+    // 不再清空搜索框，保持搜索结果下拉框显示，方便继续添加接口
+    ElMessage.success({ message: '已添加到执行链', duration: 1000 })
   } catch (error: any) {
     console.error('添加步骤失败:', error)
-    ElMessage.error(error.message || '添加到执行链失败')
+    ElMessage.error({ message: error.message || '添加到执行链失败', duration: 2000 })
   }
 }
 
 const handleSaveFlow = async () => {
   if (!flowForm.project_id || !flowForm.name) {
-    ElMessage.warning('请完善流程信息')
+    ElMessage.warning({ message: '请完善流程信息', duration: 1500 })
     return
   }
   
@@ -1525,13 +1642,13 @@ const handleSaveFlow = async () => {
   try {
     if (editingFlowId.value) {
       await apitestApi.updateApiFlow(editingFlowId.value, payload)
-      ElMessage.success('更新成功')
+      ElMessage.success({ message: '更新成功', duration: 1500 })
       loadFlows() // 只有更新成功才刷新列表
     } else {
       const result = await apitestApi.createApiFlow(payload)
       editingFlowId.value = result.id
       flowDrawerTitle.value = '编辑流程'
-      ElMessage.success('创建成功')
+      ElMessage.success({ message: '创建成功', duration: 1500 })
       loadFlows() // 只有创建成功才刷新列表
     }
   } catch (error: any) {
@@ -1545,7 +1662,7 @@ const handleSaveFlow = async () => {
         confirmButtonText: '确定'
       })
     } else {
-      ElMessage.error(errorMessage)
+      ElMessage.error({ message: errorMessage, duration: 2000 })
     }
     // 保存失败时不刷新列表，避免显示未保存的流程
   }
@@ -1557,7 +1674,7 @@ const handleExecuteFlow = async (row: ApiTestFlow) => {
     flowExecutionResult.value = result
     flowResultDialogVisible.value = true
   } catch (error: any) {
-    ElMessage.error(error.message || '执行失败')
+    ElMessage.error({ message: error.message || '执行失败', duration: 2000 })
   }
 }
 
@@ -1569,11 +1686,11 @@ const currentExecutingStep = ref(0) // 当前执行的步骤索引（从1开始�
 
 const handleExecuteFlowFromEditor = async () => {
   if (flowForm.steps.length === 0) {
-    ElMessage.warning('执行链为空，请先添加接口')
+    ElMessage.warning({ message: '执行链为空，请先添加接口', duration: 1500 })
     return
   }
   if (!executionConfig.environment_id) {
-    ElMessage.warning('请选择执行环境')
+    ElMessage.warning({ message: '请选择执行环境', duration: 1500 })
     return
   }
   
@@ -1586,7 +1703,7 @@ const handleExecuteFlowFromEditor = async () => {
   // 过滤掉被禁用的步骤
   const enabledSteps = flowForm.steps.filter(step => step.enabled !== false)
   if (enabledSteps.length === 0) {
-    ElMessage.warning('没有启用的接口，请至少启用一个接口')
+    ElMessage.warning({ message: '没有启用的接口，请至少启用一个接口', duration: 1500 })
     flowExecuting.value = false
     return
   }
@@ -1643,7 +1760,8 @@ const handleExecuteFlowFromEditor = async () => {
     const executeData: any = {
       environment_id: executionConfig.environment_id,
       global_variables: Object.keys(vars).length > 0 ? vars : undefined,
-      failAction: executionConfig.failAction || 'stop'
+      failAction: executionConfig.failAction || 'stop',
+      delay: executionConfig.delay || 0  // 传递步骤间延迟到后端
     }
     
     // 启动进度条更新
@@ -1732,7 +1850,7 @@ const handleExecuteFlowFromEditor = async () => {
       clearInterval(progressTimer)
       progressTimer = null
     }
-    ElMessage.error(error.message || '执行失败')
+    ElMessage.error({ message: error.message || '执行失败', duration: 2000 })
     executionProgressStatus.value = 'exception'
     executionProgress.value = 100
   } finally {
@@ -1776,16 +1894,35 @@ const handleClearSteps = () => {
     executionStats.total = 0
     executionStats.success = 0
     executionStats.failure = 0
-    ElMessage.success('已清空')
+    ElMessage.success({ message: '已清空', duration: 1000 })
   }).catch(() => {})
+}
+
+// 显示导出对话框
+const showExportDialog = () => {
+  if (!editingFlowId.value) {
+    ElMessage.warning({ message: '请先保存流程', duration: 1500 })
+    return
+  }
+  exportForm.name = flowForm.name || '流程导出'
+  exportForm.description = ''
+  exportForm.saveType = 'local'
+  showExportDialogVisible.value = true
 }
 
 // 导出流程
 const handleExportFlow = async () => {
   if (!editingFlowId.value) {
-    ElMessage.warning('请先保存流程')
+    ElMessage.warning({ message: '请先保存流程', duration: 1500 })
     return
   }
+  
+  if (!exportForm.name) {
+    ElMessage.warning({ message: '请输入文件名称', duration: 1500 })
+    return
+  }
+  
+  exporting.value = true
   
   try {
     // 构建完整的导出数据
@@ -1815,30 +1952,225 @@ const handleExportFlow = async () => {
     
     // 生成文件名
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/T/g, '_').slice(0, 19)
-    const safeName = flowForm.name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5\s-_]/g, '').trim() || 'flow'
+    const safeName = exportForm.name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5\s-_]/g, '').trim() || 'flow'
     const fileName = `${safeName}_${timestamp}.json`
     
-    // 创建文件并下载
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = fileName
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    // 根据保存类型处理
+    if (exportForm.saveType === 'local' || exportForm.saveType === 'both') {
+      // 创建文件并下载
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }
     
-    // 同时保存到数据库
+    if (exportForm.saveType === 'fileManage' || exportForm.saveType === 'both') {
+      // 保存到文件管理
+      await apitestApi.createTestFile({
+        name: exportForm.name,
+        description: exportForm.description,
+        file_type: 'flow',
+        file_content: exportData,
+        flow_id: editingFlowId.value
+      })
+    }
+    
+    // 同时保存到数据库导出记录
     try {
       await apitestApi.exportApiFlow(editingFlowId.value)
     } catch (dbError) {
       console.warn('保存到数据库失败:', dbError)
     }
     
-    ElMessage.success(`导出成功，文件已下载：${fileName}`)
+    showExportDialogVisible.value = false
+    
+    if (exportForm.saveType === 'local') {
+      ElMessage.success({ message: `导出成功，文件已下载：${fileName}`, duration: 1500 })
+    } else if (exportForm.saveType === 'fileManage') {
+      ElMessage.success({ message: '导出成功，已保存到文件管理', duration: 1500 })
+    } else {
+      ElMessage.success({ message: `导出成功，文件已下载并保存到文件管理`, duration: 1500 })
+    }
   } catch (error: any) {
-    ElMessage.error('导出失败: ' + (error.message || '未知错误'))
+    ElMessage.error({ message: '导出失败: ' + (error.message || '未知错误'), duration: 2000 })
+  } finally {
+    exporting.value = false
+  }
+}
+
+// 加载文件管理列表（用于导入）
+const loadTestFilesForImport = async () => {
+  loadingTestFiles.value = true
+  try {
+    const response = await apitestApi.getTestFiles({
+      keyword: fileManageKeyword.value || undefined,
+      page: 1,
+      page_size: 50
+    })
+    testFilesForImport.value = response.items
+  } catch (error: any) {
+    ElMessage.error({ message: '加载文件列表失败: ' + (error.message || '未知错误'), duration: 2000 })
+  } finally {
+    loadingTestFiles.value = false
+  }
+}
+
+// 从文件管理导入
+const doImportFromFileManage = async (fileId: number, asNew: boolean) => {
+  try {
+    const content = await apitestApi.getTestFileContent(fileId)
+    
+    if (!content || !content.flow) {
+      ElMessage.error({ message: '文件内容无效', duration: 2000 })
+      return
+    }
+    
+    if (asNew) {
+      // 导入为新流程
+      await ElMessageBox.confirm(
+        '确定要将此文件导入为新流程吗？',
+        '确认导入',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'info'
+        }
+      )
+      
+      // 使用导入数据创建新流程
+      await doImportAsNewFlow(content)
+    } else {
+      // 导入到当前流程
+      await ElMessageBox.confirm(
+        '导入将覆盖当前流程的所有数据（接口、执行配置、局部变量），是否继续？',
+        '确认导入',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+      
+      await doImportToCurrentFlow(content)
+    }
+    
+    showImportDialog.value = false
+    ElMessage.success({ message: '导入成功', duration: 1500 })
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error({ message: '导入失败: ' + (error.message || '未知错误'), duration: 2000 })
+    }
+  }
+}
+
+// 导入为新流程（辅助函数）
+const doImportAsNewFlow = async (data: any) => {
+  // 重置表单
+  flowForm.project_id = data.flow?.project_id
+  flowForm.name = '' // 流程名称留空，让用户自己输入
+  flowForm.description = data.flow?.description || ''
+  flowForm.environment_id = data.flow?.environment_id || data.executionConfig?.environment_id
+  flowForm.global_variables_text = data.flow?.global_variables ? JSON.stringify(data.flow.global_variables, null, 2) : '{\n}'
+  flowForm.steps = data.flow?.steps ? normalizeSteps(data.flow.steps) : []
+  
+  // 更新执行配置
+  if (data.executionConfig) {
+    executionConfig.environment_id = data.executionConfig.environment_id
+    executionConfig.failAction = data.executionConfig.failAction || 'stop'
+    executionConfig.delay = data.executionConfig.delay || 500
+  }
+  
+  // 更新局部变量
+  if (data.variables && Array.isArray(data.variables)) {
+    localVariables.value = data.variables.map((v: any) => ({
+      key: v.key || '',
+      value: v.value || ''
+    }))
+  } else {
+    localVariables.value = []
+  }
+  
+  // 加载执行链中接口的详细信息
+  await loadStepEndpoints()
+  
+  // 清空编辑ID，表示这是新流程
+  editingFlowId.value = undefined
+}
+
+// 导入到当前流程（辅助函数）
+const doImportToCurrentFlow = async (data: any) => {
+  if (!editingFlowId.value) {
+    throw new Error('请先保存流程')
+  }
+  
+  // 更新流程数据（不修改流程名称，保持当前名称）
+  const updateData: any = {
+    description: data.flow?.description !== undefined ? data.flow.description : '',
+    project_id: data.flow?.project_id || flowForm.project_id,
+    environment_id: data.flow?.environment_id || data.executionConfig?.environment_id,
+    global_variables: data.flow?.global_variables || {},
+    steps: data.flow?.steps || []
+  }
+  
+  const updatedFlow = await apitestApi.updateApiFlow(editingFlowId.value, updateData)
+  
+  // 更新表单（保持当前名称不变）
+  flowForm.description = data.flow?.description || updatedFlow.description || ''
+  flowForm.project_id = updatedFlow.project_id
+  flowForm.environment_id = updatedFlow.environment_id
+  flowForm.global_variables_text = updatedFlow.global_variables ? JSON.stringify(updatedFlow.global_variables, null, 2) : '{\n}'
+  flowForm.steps = updatedFlow.steps ? normalizeSteps(updatedFlow.steps) : []
+  
+  // 加载执行链中接口的详细信息
+  await loadStepEndpoints()
+  
+  // 更新执行配置
+  if (data.executionConfig) {
+    executionConfig.environment_id = data.executionConfig.environment_id
+    executionConfig.failAction = data.executionConfig.failAction || 'stop'
+    executionConfig.delay = data.executionConfig.delay || 500
+  }
+  
+  // 更新局部变量
+  if (data.variables && Array.isArray(data.variables)) {
+    localVariables.value = data.variables.map((v: any) => ({
+      key: v.key || '',
+      value: v.value || ''
+    }))
+  }
+}
+
+// 加载执行链中接口的详细信息
+const loadStepEndpoints = async () => {
+  if (flowForm.steps.length > 0) {
+    const stepEndpointIds = flowForm.steps.map(step => step.endpoint_id).filter(id => id) as number[]
+    if (stepEndpointIds.length > 0) {
+      try {
+        if (flowForm.project_id) {
+          try {
+            const projectEndpoints = await apitestApi.getApiEndpoints({ project_id: flowForm.project_id, limit: 500 })
+            flowEndpoints.value = projectEndpoints
+            endpoints.value = projectEndpoints
+          } catch (error) {
+            // 忽略错误
+          }
+        }
+        
+        const allEndpoints = await apitestApi.getApiEndpoints({ limit: 1000 })
+        const missingIds = stepEndpointIds.filter(id => !endpoints.value.find(ep => ep.id === id))
+        if (missingIds.length > 0) {
+          const missingEndpoints = allEndpoints.filter(ep => missingIds.includes(ep.id))
+          endpoints.value = [...endpoints.value, ...missingEndpoints]
+        }
+      } catch (error) {
+        console.error('加载接口信息失败:', error)
+      }
+    }
   }
 }
 
@@ -1865,6 +2197,10 @@ const handleImportFlow = async () => {
   } else {
     flowExports.value = []
   }
+  
+  // 加载文件管理列表
+  fileManageKeyword.value = ''
+  loadTestFilesForImport()
   
   // 重置导入数据
   clearImportData()
@@ -1900,7 +2236,7 @@ const handleFileImportChange = (file: any) => {
       const data = JSON.parse(content)
       importFileData.value = data
     } catch (error) {
-      ElMessage.error('文件格式错误，请选择有效的JSON文件')
+      ElMessage.error({ message: '文件格式错误，请选择有效的JSON文件', duration: 2000 })
       importFileData.value = null
     }
   }
@@ -1910,7 +2246,7 @@ const handleFileImportChange = (file: any) => {
 // 从文件导入为新流程
 const doImportFromFile = async () => {
   if (!importFileData.value) {
-    ElMessage.warning('请先选择文件')
+    ElMessage.warning({ message: '请先选择文件', duration: 1500 })
     return
   }
   
@@ -1939,12 +2275,8 @@ const doImportFromFile = async () => {
         key: v.key || '',
         value: v.value || ''
       }))
-      // 如果最后一行不是空的，添加一个空行
-      if (localVariables.value.length === 0 || (localVariables.value[localVariables.value.length - 1].key.trim() && localVariables.value[localVariables.value.length - 1].value.trim())) {
-        localVariables.value.push({ key: '', value: '' })
-      }
     } else {
-      localVariables.value = [{ key: '', value: '' }]
+      localVariables.value = []
     }
     
     // 加载执行链中接口的详细信息，以便在执行链中显示接口名称、路径等
@@ -1984,7 +2316,7 @@ const doImportFromFile = async () => {
     clearImportData()
     
     showImportDialog.value = false
-    ElMessage.success('导入成功，请保存流程')
+    ElMessage.success({ message: '导入成功，请保存流程', duration: 1500 })
   } catch (error: any) {
     // 如果是名称重复错误，弹出提示框
     const errorMsg = error.message || error.response?.data?.detail || '未知错误'
@@ -1994,7 +2326,7 @@ const doImportFromFile = async () => {
         confirmButtonText: '确定'
       })
     } else {
-      ElMessage.error('导入失败: ' + errorMsg)
+      ElMessage.error({ message: '导入失败: ' + errorMsg, duration: 2000 })
     }
   }
 }
@@ -2002,12 +2334,12 @@ const doImportFromFile = async () => {
 // 从文件导入到当前流程
 const doImportFromFileToCurrent = async () => {
   if (!editingFlowId.value) {
-    ElMessage.warning('请先保存流程')
+    ElMessage.warning({ message: '请先保存流程', duration: 1500 })
     return
   }
   
   if (!importFileData.value) {
-    ElMessage.warning('请先选择文件')
+    ElMessage.warning({ message: '请先选择文件', duration: 1500 })
     return
   }
   
@@ -2093,9 +2425,6 @@ const doImportFromFileToCurrent = async () => {
       
       await apitestApi.saveFlowVariables(editingFlowId.value, variables)
       localVariables.value = variables.map((v: any) => ({ key: v.key, value: v.value }))
-      if (localVariables.value.length === 0 || (localVariables.value[localVariables.value.length - 1].key.trim() && localVariables.value[localVariables.value.length - 1].value.trim())) {
-        localVariables.value.push({ key: '', value: '' })
-      }
     }
     
     // 刷新流程列表，确保名称同步
@@ -2155,11 +2484,8 @@ const doImportFlow = async (exportId: number, asNew: boolean = false) => {
           key: v.key || '',
           value: v.value || ''
         }))
-        if (localVariables.value.length === 0 || (localVariables.value[localVariables.value.length - 1].key.trim() && localVariables.value[localVariables.value.length - 1].value.trim())) {
-          localVariables.value.push({ key: '', value: '' })
-        }
       } else {
-        localVariables.value = [{ key: '', value: '' }]
+        localVariables.value = []
       }
       
       // 清空编辑ID，表示这是新流程
@@ -2185,7 +2511,7 @@ const doImportFlow = async (exportId: number, asNew: boolean = false) => {
   } else {
     // 导入到当前流程
     if (!editingFlowId.value) {
-      ElMessage.warning('请先保存流程')
+      ElMessage.warning({ message: '请先保存流程', duration: 1500 })
       return
     }
     
@@ -2270,23 +2596,23 @@ const doDeleteExport = async (exportId: number) => {
     // 重新加载导出记录列表
     flowExports.value = await apitestApi.getFlowExports(editingFlowId.value)
     
-    ElMessage.success('删除成功')
+    ElMessage.success({ message: '删除成功', duration: 1000 })
   } catch (error: any) {
     if (error === 'cancel' || error === 'close') {
       return
     }
-    ElMessage.error('删除失败: ' + (error.message || '未知错误'))
+    ElMessage.error({ message: '删除失败: ' + (error.message || '未知错误'), duration: 2000 })
   }
 }
 
 // 搜索接口
 const searchEndpoints = () => {
   if (!flowForm.project_id) {
-    ElMessage.warning('请先选择项目')
+    ElMessage.warning({ message: '请先选择项目', duration: 1500 })
     return
   }
   if (!flowEndpointKeyword.value.trim()) {
-    ElMessage.warning('请输入搜索关键词')
+    ElMessage.warning({ message: '请输入搜索关键词', duration: 1500 })
     return
   }
   // 如果还没有加载接口列表，先加载
@@ -2339,9 +2665,9 @@ const showGenerateDialog = (type: 'timestamp' | 'timepoint') => {
 // 复制生成的值
 const copyGeneratedValue = () => {
   navigator.clipboard.writeText(generatedValue.value).then(() => {
-    ElMessage.success('已复制')
+    ElMessage.success({ message: '已复制', duration: 1000 })
   }).catch(() => {
-    ElMessage.error('复制失败')
+    ElMessage.error({ message: '复制失败', duration: 2000 })
   })
 }
 
@@ -2362,33 +2688,95 @@ const removeLocalVariable = async (index: number) => {
   if (variable.id && editingFlowId.value) {
     try {
       await apitestApi.deleteFlowVariable(editingFlowId.value, variable.id)
-      ElMessage.success('删除成功')
+      ElMessage.success({ message: '删除成功', duration: 1000 })
     } catch (error: any) {
-      ElMessage.error(error.message || '删除失败')
+      ElMessage.error({ message: error.message || '删除失败', duration: 2000 })
       return
     }
   }
   localVariables.value.splice(index, 1)
-  // 如果删除后没有空行，添加一个空行
-  if (localVariables.value.length === 0 || 
-      (localVariables.value[localVariables.value.length - 1].key.trim() && 
-       localVariables.value[localVariables.value.length - 1].value.trim())) {
-    localVariables.value.push({ key: '', value: '' })
+}
+
+// 复制变量引用格式（如 STR($Tenant)）
+// 复制变量引用（带格式选择）
+const copyVariableWithFormat = async (key: string, format: string) => {
+  if (!key || !key.trim()) {
+    ElMessage.warning({ message: '变量名为空，无法复制', duration: 1500 })
+    return
+  }
+  
+  const varName = key.trim()
+  const reference = `${format}($${varName})`
+  await copyToClipboard(reference)
+}
+
+// 兼容旧的函数（用于执行配置中的复制按钮）
+const copyVariableReference = async (key: string) => {
+  if (!key || !key.trim()) {
+    ElMessage.warning({ message: '变量名为空，无法复制', duration: 1500 })
+    return
+  }
+  
+  const varName = key.trim()
+  
+  try {
+    // 弹出选择框
+    await ElMessageBox.confirm(
+      `请选择要复制的格式：`,
+      `复制变量引用：${varName}`,
+      {
+        distinguishCancelAndClose: true,
+        confirmButtonText: `STR($${varName})`,
+        cancelButtonText: `NUM($${varName})`,
+        type: 'info',
+        center: true
+      }
+    )
+    // 用户点击了确认按钮 - 复制 STR 格式
+    await copyToClipboard(`STR($${varName})`)
+  } catch (action) {
+    // 用户点击了取消按钮 - 复制 NUM 格式
+    if (action === 'cancel') {
+      await copyToClipboard(`NUM($${varName})`)
+    }
+    // 如果是 'close'，则不做任何操作（用户关闭了对话框）
   }
 }
 
-// 复制变量引用格式（如 {{Tenant}}）
-const copyVariableReference = (key: string) => {
-  if (!key || !key.trim()) {
-    ElMessage.warning('变量名为空，无法复制')
-    return
+// 复制到剪贴板的辅助函数
+const copyToClipboard = async (text: string) => {
+  // 尝试使用现代 Clipboard API
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      ElMessage.success({ message: `已复制: ${text}`, duration: 1500 })
+      return
+    } catch (err) {
+      console.warn('Clipboard API 失败，尝试备用方案', err)
+    }
   }
-  const reference = `{{${key.trim()}}}`
-  navigator.clipboard.writeText(reference).then(() => {
-    ElMessage.success(`已复制: ${reference}`)
-  }).catch(() => {
-    ElMessage.error('复制失败')
-  })
+  
+  // 备用方案：使用 execCommand
+  try {
+    const textArea = document.createElement('textarea')
+    textArea.value = text
+    textArea.style.position = 'fixed'
+    textArea.style.left = '-9999px'
+    textArea.style.top = '-9999px'
+    document.body.appendChild(textArea)
+    textArea.focus()
+    textArea.select()
+    const success = document.execCommand('copy')
+    document.body.removeChild(textArea)
+    if (success) {
+      ElMessage.success({ message: `已复制: ${text}`, duration: 1500 })
+    } else {
+      ElMessage.error({ message: '复制失败', duration: 2000 })
+    }
+  } catch (err) {
+    console.error('复制失败:', err)
+    ElMessage.error({ message: '复制失败', duration: 2000 })
+  }
 }
 
 // 序列化对象，保持模板语法的原始格式（带引号或不带引号）
@@ -2547,97 +2935,27 @@ const handleEditStep = async (index: number) => {
     
     stepEditDrawerVisible.value = true
   } catch (error: any) {
-    ElMessage.error(error.message || '加载接口详情失败')
+    ElMessage.error({ message: error.message || '加载接口详情失败', duration: 2000 })
   }
 }
 
 
 // 切换到下一个步骤
+// 截断变量值显示
+const truncateVariableValue = (value: string, maxLength: number = 30): string => {
+  if (!value) return ''
+  if (value.length <= maxLength) return value
+  return value.substring(0, maxLength) + '...'
+}
+
 const handleNextStep = async () => {
-  // 先保存当前步骤（静默保存，不显示错误提示）
+  // 先保存当前步骤
+  // 重要：必须等待保存完成并同步服务器返回的数据，才能切换到下一步
+  // 否则会导致前一个步骤的修改被覆盖
   try {
-    // 解析并保存参数
-    let pathParams: Record<string, any> = {}
-    let queryParams: Record<string, any> = {}
-    let headers: Record<string, any> = {}
-    let body: Record<string, any> | any = {}
-    
-    if (stepPathParamsText.value.trim()) {
-      try {
-        const parsed = JSON.parse(stepPathParamsText.value.trim())
-        pathParams = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {}
-      } catch (e: any) {
-        // 忽略解析错误，继续下一步
-      }
-    }
-    
-    if (stepQueryParamsText.value.trim()) {
-      try {
-        const parsed = JSON.parse(stepQueryParamsText.value.trim())
-        queryParams = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {}
-      } catch (e: any) {
-        // 忽略解析错误，继续下一步
-      }
-    }
-    
-    if (stepHeadersText.value.trim()) {
-      try {
-        const parsed = JSON.parse(stepHeadersText.value.trim())
-        headers = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {}
-      } catch (e: any) {
-        // 忽略解析错误，继续下一步
-      }
-    }
-    
-    if (stepBodyText.value.trim()) {
-      try {
-        const parsed = JSON.parse(stepBodyText.value.trim())
-        body = parsed
-      } catch (e: any) {
-        // 忽略解析错误，继续下一步
-      }
-    }
-    
-    // 保存到 step
-    const step = flowForm.steps[editingStepIndex.value]
-    step.path_params = pathParams
-    step.query_params = queryParams
-    step.headers = headers
-    step.body = body
-    step.assertions = stepAssertions.value.map(a => ({
-      type: a.type,
-      operator: a.operator,
-      target: a.target,
-      expected: a.expected
-    }))
-    
-    // 如果流程已存在，自动保存到后端
-    if (editingFlowId.value) {
-      const vars: Record<string, string> = {}
-      localVariables.value.forEach(v => {
-        if (v.key.trim() && v.value.trim()) {
-          vars[v.key] = v.value
-        }
-      })
-      const globalVars = Object.keys(vars).length > 0 ? vars : undefined
-      
-      if (executionConfig.environment_id) {
-        flowForm.environment_id = executionConfig.environment_id
-      }
-      
-      const payload: Partial<ApiTestFlow> = {
-        project_id: flowForm.project_id,
-        name: flowForm.name,
-        description: flowForm.description,
-        environment_id: flowForm.environment_id,
-        global_variables: globalVars,
-        steps: flowForm.steps
-      }
-      
-      await apitestApi.updateApiFlow(editingFlowId.value, payload)
-    }
+    await handleStepSave()
   } catch (error: any) {
-    // 保存失败也不阻止切换到下一步
+    // 保存失败时提示用户，但不阻止切换
     console.error('保存步骤失败:', error)
   }
   
@@ -2669,7 +2987,7 @@ const loadStepTestData = async (endpointId: number) => {
       stepTestDataList.value = [created]
     }
   } catch (error: any) {
-    ElMessage.error(error.message || '加载测试数据失败')
+    ElMessage.error({ message: error.message || '加载测试数据失败', duration: 2000 })
   }
 }
 
@@ -2713,12 +3031,12 @@ const prefillStepFromTestData = (type: 'path_params' | 'query_params' | 'headers
 // 执行步骤接口
 const handleStepExecuteSubmit = async () => {
   if (!editingStep.value || !editingStep.value.endpoint_id) {
-    ElMessage.warning('接口信息不完整')
+    ElMessage.warning({ message: '接口信息不完整', duration: 1500 })
     return
   }
   
   if (!executionConfig.environment_id) {
-    ElMessage.warning('请先选择执行环境')
+    ElMessage.warning({ message: '请先选择执行环境', duration: 1500 })
     return
   }
   
@@ -2729,16 +3047,6 @@ const handleStepExecuteSubmit = async () => {
   let body: Record<string, any> | any = {}
   
   try {
-    if (stepPathParamsText.value.trim()) {
-      try {
-        const parsed = JSON.parse(stepPathParamsText.value.trim())
-        pathParams = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {}
-      } catch (e: any) {
-        ElMessage.error('Path参数JSON格式错误: ' + (e.message || '请检查输入'))
-        return
-      }
-    }
-    
     // 在执行接口时，也使用相同的解析逻辑
     const parseJsonWithTemplatesForExecute = (jsonText: string): any => {
       try {
@@ -2923,6 +3231,19 @@ const handleStepExecuteSubmit = async () => {
       }
     }
     
+    // 解析Path参数（使用支持模板语法的解析函数）
+    if (stepPathParamsText.value.trim()) {
+      try {
+        pathParams = parseJsonWithTemplatesForExecute(stepPathParamsText.value.trim())
+        if (!(pathParams && typeof pathParams === 'object' && !Array.isArray(pathParams))) {
+          pathParams = {}
+        }
+      } catch (e: any) {
+        ElMessage.error({ message: 'Path参数JSON格式错误: ' + (e.message || '请检查输入'), duration: 2000 })
+        return
+      }
+    }
+    
     if (stepQueryParamsText.value.trim()) {
       try {
         queryParams = parseJsonWithTemplatesForExecute(stepQueryParamsText.value.trim())
@@ -2930,7 +3251,7 @@ const handleStepExecuteSubmit = async () => {
           queryParams = {}
         }
       } catch (e: any) {
-        ElMessage.error('Query参数JSON格式错误: ' + (e.message || '请检查输入'))
+        ElMessage.error({ message: 'Query参数JSON格式错误: ' + (e.message || '请检查输入'), duration: 2000 })
         return
       }
     }
@@ -2942,7 +3263,7 @@ const handleStepExecuteSubmit = async () => {
           headers = {}
         }
       } catch (e: any) {
-        ElMessage.error('Header参数JSON格式错误: ' + (e.message || '请检查输入'))
+        ElMessage.error({ message: 'Header参数JSON格式错误: ' + (e.message || '请检查输入'), duration: 2000 })
         return
       }
     }
@@ -2951,12 +3272,12 @@ const handleStepExecuteSubmit = async () => {
       try {
         body = parseJsonWithTemplatesForExecute(stepBodyText.value.trim())
       } catch (e: any) {
-        ElMessage.error('Body参数JSON格式错误: ' + (e.message || '请检查输入'))
+        ElMessage.error({ message: 'Body参数JSON格式错误: ' + (e.message || '请检查输入'), duration: 2000 })
         return
       }
     }
   } catch (error: any) {
-    ElMessage.error('参数解析失败: ' + (error.message || '未知错误'))
+    ElMessage.error({ message: '参数解析失败: ' + (error.message || '未知错误'), duration: 2000 })
     return
   }
   
@@ -2992,9 +3313,9 @@ const handleStepExecuteSubmit = async () => {
     })
     
     stepExecutionResult.value = result
-    ElMessage.success('执行成功')
+    ElMessage.success({ message: '执行成功', duration: 1000 })
   } catch (error: any) {
-    ElMessage.error(error.message || '执行失败')
+    ElMessage.error({ message: error.message || '执行失败', duration: 2000 })
   } finally {
     stepExecuting.value = false
   }
@@ -3003,7 +3324,7 @@ const handleStepExecuteSubmit = async () => {
 // 保存步骤参数
 const handleStepSave = async () => {
   if (editingStepIndex.value < 0 || !editingStep.value) {
-    ElMessage.warning('请先选择要编辑的接口')
+    ElMessage.warning({ message: '请先选择要编辑的接口', duration: 1500 })
     return
   }
   
@@ -3188,7 +3509,7 @@ const handleStepSave = async () => {
         const parsed = parseJsonWithTemplates(stepPathParamsText.value.trim())
         pathParams = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {}
       } catch (e: any) {
-        ElMessage.error('Path参数JSON格式错误，无法保存')
+        ElMessage.error({ message: 'Path参数JSON格式错误，无法保存', duration: 2000 })
         return
       }
     } else {
@@ -3198,7 +3519,7 @@ const handleStepSave = async () => {
     
     if (stepQueryParamsText.value.trim()) {
       if (!validateJsonWithTemplates(stepQueryParamsText.value.trim())) {
-        ElMessage.error('Query参数JSON格式错误，无法保存')
+        ElMessage.error({ message: 'Query参数JSON格式错误，无法保存', duration: 2000 })
         return
       }
       try {
@@ -3207,7 +3528,7 @@ const handleStepSave = async () => {
           queryParams = {}
         }
       } catch (e: any) {
-        ElMessage.error('Query参数JSON格式错误，无法保存: ' + (e.message || '请检查输入'))
+        ElMessage.error({ message: 'Query参数JSON格式错误，无法保存: ' + (e.message || '请检查输入'), duration: 2000 })
         return
       }
     } else {
@@ -3218,7 +3539,7 @@ const handleStepSave = async () => {
     // 处理Header：如果有输入则解析，如果为空字符串则设置为空对象
     if (stepHeadersText.value.trim()) {
       if (!validateJsonWithTemplates(stepHeadersText.value.trim())) {
-        ElMessage.error('Header参数JSON格式错误，无法保存')
+        ElMessage.error({ message: 'Header参数JSON格式错误，无法保存', duration: 2000 })
         return
       }
       try {
@@ -3233,7 +3554,7 @@ const handleStepSave = async () => {
         }
       } catch (e: any) {
         console.error('Header解析错误:', e, '输入:', stepHeadersText.value.trim())
-        ElMessage.error('Header参数JSON格式错误，无法保存: ' + (e.message || ''))
+        ElMessage.error({ message: 'Header参数JSON格式错误，无法保存: ' + (e.message || ''), duration: 2000 })
         return
       }
     } else {
@@ -3243,13 +3564,13 @@ const handleStepSave = async () => {
     
     if (stepBodyText.value.trim()) {
       if (!validateJsonWithTemplates(stepBodyText.value.trim())) {
-        ElMessage.error('Body参数JSON格式错误，无法保存')
+        ElMessage.error({ message: 'Body参数JSON格式错误，无法保存', duration: 2000 })
         return
       }
       try {
         body = parseJsonWithTemplates(stepBodyText.value.trim())
       } catch (e: any) {
-        ElMessage.error('Body参数JSON格式错误，无法保存')
+        ElMessage.error({ message: 'Body参数JSON格式错误，无法保存', duration: 2000 })
         return
       }
     } else {
@@ -3431,20 +3752,48 @@ const handleStepSave = async () => {
               assertions: serverStep.assertions || [],
             }
           }
-          ElMessage.warning('保存成功，但服务器返回的数据不完整，请刷新页面确认')
+          ElMessage.warning({ message: '保存成功，但服务器返回的数据不完整，请刷新页面确认', duration: 2000 })
         }
-        ElMessage.success('保存成功')
+        ElMessage.success({ message: '保存成功', duration: 1000 })
+        
+        // 保存成功后，重新格式化显示（2空格缩进）
+        if (pathParams !== undefined) {
+          stepPathParamsText.value = stringifyWithTemplates(pathParams, 2)
+        }
+        if (queryParams !== undefined) {
+          stepQueryParamsText.value = stringifyWithTemplates(queryParams, 2)
+        }
+        if (headers !== undefined) {
+          stepHeadersText.value = stringifyWithTemplates(headers, 2)
+        }
+        if (body !== undefined) {
+          stepBodyText.value = stringifyWithTemplates(body, 2)
+        }
       } catch (saveError: any) {
         console.error('保存到服务器失败:', saveError)
-        ElMessage.error('保存到服务器失败: ' + (saveError.message || '未知错误'))
+        ElMessage.error({ message: '保存到服务器失败: ' + (saveError.message || '未知错误'), duration: 2000 })
         // 保存失败时，不抛出错误，让用户知道保存失败但本地数据已更新
         throw saveError // 重新抛出错误，让调用者知道保存失败
       }
     } else {
-      ElMessage.success('保存成功（请保存流程以持久化）')
+      ElMessage.success({ message: '保存成功（请保存流程以持久化）', duration: 1000 })
+      
+      // 即使未保存到服务器，也格式化显示
+      if (pathParams !== undefined) {
+        stepPathParamsText.value = stringifyWithTemplates(pathParams, 2)
+      }
+      if (queryParams !== undefined) {
+        stepQueryParamsText.value = stringifyWithTemplates(queryParams, 2)
+      }
+      if (headers !== undefined) {
+        stepHeadersText.value = stringifyWithTemplates(headers, 2)
+      }
+      if (body !== undefined) {
+        stepBodyText.value = stringifyWithTemplates(body, 2)
+      }
     }
   } catch (error: any) {
-    ElMessage.error('保存失败: ' + (error.message || '未知错误'))
+    ElMessage.error({ message: '保存失败: ' + (error.message || '未知错误'), duration: 2000 })
   }
 }
 
@@ -3458,7 +3807,7 @@ const removeStepAssertion = (index: number) => {
   if (stepAssertions.value.length > 1) {
     stepAssertions.value.splice(index, 1)
   } else {
-    ElMessage.warning('至少需要保留一个断言')
+    ElMessage.warning({ message: '至少需要保留一个断言', duration: 1500 })
   }
 }
 
@@ -3505,7 +3854,7 @@ const toggleResultDetail = (index: number) => {
 // 保存局部变量
 const saveLocalVariables = async () => {
   if (!editingFlowId.value) {
-    ElMessage.warning('请先保存流程')
+    ElMessage.warning({ message: '请先保存流程', duration: 1500 })
     return
   }
   
@@ -3528,10 +3877,6 @@ const saveLocalVariables = async () => {
       key: v.key,
       value: v.value
     }))
-    // 如果最后一行不是空的，添加一个空行
-    if (localVariables.value.length === 0 || (localVariables.value[localVariables.value.length - 1].key.trim() && localVariables.value[localVariables.value.length - 1].value.trim())) {
-      localVariables.value.push({ key: '', value: '' })
-    }
     
     // 同时更新全局变量对象（用于向后兼容）
     const vars: Record<string, string> = {}
@@ -3540,9 +3885,9 @@ const saveLocalVariables = async () => {
     })
     flowForm.global_variables_text = JSON.stringify(vars, null, 2)
     
-    ElMessage.success('保存成功')
+    ElMessage.success({ message: '保存成功', duration: 1000 })
   } catch (error: any) {
-    ElMessage.error(error.message || '保存失败')
+    ElMessage.error({ message: error.message || '保存失败', duration: 2000 })
   }
 }
 
@@ -3617,7 +3962,7 @@ const getEndpointDescription = (id?: number) => {
 // 显示流程接口列表
 const showFlowEndpoints = async (flow: ApiTestFlow) => {
   if (!flow.steps || flow.steps.length === 0) {
-    ElMessage.info('该流程暂无接口')
+    ElMessage.info({ message: '该流程暂无接口', duration: 1500 })
     return
   }
   
@@ -3636,7 +3981,7 @@ const showFlowEndpoints = async (flow: ApiTestFlow) => {
       const allEndpoints = await apitestApi.getApiEndpoints({ limit: 1000 })
       endpointList = allEndpoints.filter(ep => endpointIds.includes(ep.id))
     } catch (error: any) {
-      ElMessage.error('加载接口列表失败')
+      ElMessage.error({ message: '加载接口列表失败', duration: 2000 })
       return
     }
   }
@@ -3651,6 +3996,7 @@ const showFlowEndpoints = async (flow: ApiTestFlow) => {
   })
   
   selectedFlowEndpoints.value = sortedEndpoints
+  endpointsDialogPage.value = 1  // 重置分页到第一页
   showEndpointsDialog.value = true
 }
 
@@ -3728,22 +4074,41 @@ onMounted(async () => {
   height: 100%;
   animation: fadeIn 0.5s ease-in;
   padding: 0;
+  box-sizing: border-box;
 }
 
-.filter-card,
-.table-card {
+.filter-card {
+  margin-bottom: 24px;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 16px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  margin-bottom: 20px;
+  overflow: hidden;
   transition: all 0.3s ease;
+  position: relative;
 }
 
-.filter-card:hover,
+.filter-card:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.table-card {
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
 .table-card:hover {
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .filter-header {
@@ -3801,6 +4166,17 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-right: 30px;
+}
+
+/* 接口列表弹框关闭按钮样式 - 白色背景显示深色关闭按钮 */
+.endpoints-dialog-centered :deep(.el-dialog__headerbtn .el-dialog__close) {
+  color: #909399;
+  font-size: 20px;
+}
+
+.endpoints-dialog-centered :deep(.el-dialog__headerbtn:hover .el-dialog__close) {
+  color: #409eff;
 }
 
 .dialog-title {
@@ -4166,7 +4542,7 @@ onMounted(async () => {
 
 /* 编辑步骤抽屉样式 */
 .step-edit-container {
-  height: calc(100vh - 120px);
+  height: calc(100vh - 160px);
   display: flex;
   flex-direction: column;
 }
@@ -4195,16 +4571,16 @@ onMounted(async () => {
 }
 
 .step-edit-left :deep(.el-descriptions) {
-  margin-bottom: 16px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
 }
 
 .step-edit-left :deep(.el-descriptions__label) {
-  font-weight: 500;
-  color: #606266;
+  width: 80px;
 }
 
 .step-edit-left :deep(.el-descriptions__content) {
-  color: #303133;
+  color: #606266;
 }
 
 .step-edit-right {
@@ -4230,9 +4606,65 @@ onMounted(async () => {
   border-radius: 3px;
 }
 
-.step-edit-left::-webkit-scrollbar-thumb:hover,
-.step-edit-right::-webkit-scrollbar-thumb:hover {
-  background-color: #c0c4cc;
+
+/* 局部变量快捷引用样式 */
+.variables-quick-ref {
+  margin: 16px 0;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
+  border: 1px solid #b3d8ff;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.quick-ref-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+  white-space: nowrap;
+  padding-top: 4px;
+}
+
+.quick-ref-label .el-icon {
+  font-size: 16px;
+  color: #409eff;
+}
+
+.quick-ref-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+}
+
+.variable-quick-btn {
+  font-size: 12px;
+  padding: 5px 12px;
+  height: auto;
+  border-radius: 4px;
+  font-family: inherit;
+  transition: all 0.3s;
+  background: #ecf5ff !important;
+  border: 1px solid #d9ecff !important;
+  color: #409eff !important;
+  font-weight: normal;
+}
+
+.variable-quick-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 6px rgba(64, 158, 255, 0.15);
+  background: #d9ecff !important;
+  border-color: #b3d8ff !important;
+  color: #409eff !important;
+}
+
+.variable-quick-btn .el-icon--right {
+  margin-left: 4px;
 }
 
 .param-tabs {
@@ -4243,6 +4675,12 @@ onMounted(async () => {
   width: 100%;
 }
 
+.param-textarea-fixed :deep(textarea) {
+  height: 400px !important;
+  min-height: 400px !important;
+  max-height: 400px !important;
+}
+
 .response-pre {
   background: #f8fafc;
   padding: 16px;
@@ -4251,7 +4689,7 @@ onMounted(async () => {
   font-size: 13px;
   line-height: 1.6;
   margin: 0;
-  max-height: 500px;
+  max-height: 300px;
   overflow-y: auto;
   border: 1px solid #ebeef5;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
@@ -4262,7 +4700,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 400px;
+  height: 200px;
 }
 
 .response-content {
@@ -4327,15 +4765,12 @@ onMounted(async () => {
   border-radius: 50%;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 600;
   font-size: 14px;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 1;
-  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
 .step-content {
@@ -4374,17 +4809,80 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 
-/* 修复启用/禁用按钮的颜色问题 */
+/* 执行链步骤操作按钮 - 去掉白色背景 */
+.step-actions .el-button {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 4px !important;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.step-actions .el-button:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  transform: scale(1.1);
+}
+
+.step-actions .el-button:focus {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* 启用/禁用按钮 - 绿色(启用)/橙色(禁用) */
 .step-actions .toggle-enable-btn.el-button--success {
-  color: var(--el-color-success);
+  color: #67c23a !important;
 }
 
 .step-actions .toggle-enable-btn.el-button--warning {
-  color: var(--el-color-warning);
+  color: #e6a23c !important;
 }
 
 .step-actions .toggle-enable-btn:hover {
   opacity: 0.8;
+}
+
+/* 上移按钮 - 蓝色 */
+.step-actions .el-button:nth-child(2) {
+  color: #409eff !important;
+}
+
+.step-actions .el-button:nth-child(2):hover {
+  color: #66b1ff !important;
+}
+
+/* 下移按钮 - 蓝色 */
+.step-actions .el-button:nth-child(3) {
+  color: #409eff !important;
+}
+
+.step-actions .el-button:nth-child(3):hover {
+  color: #66b1ff !important;
+}
+
+/* 复制按钮 - 紫色 */
+.step-actions .el-button:nth-child(4) {
+  color: #9b59b6 !important;
+}
+
+.step-actions .el-button:nth-child(4):hover {
+  color: #a569bd !important;
+}
+
+/* 删除按钮 - 红色 */
+.step-actions .el-button:nth-child(5) {
+  color: #f56c6c !important;
+}
+
+.step-actions .el-button:nth-child(5):hover {
+  color: #f78989 !important;
+}
+
+/* 禁用状态的按钮变灰 */
+.step-actions .el-button.is-disabled {
+  color: #c0c4cc !important;
+  opacity: 0.6;
 }
 
 .empty-chain {
@@ -4769,28 +5267,17 @@ onMounted(async () => {
   color: white !important;
 }
 
-/* 接口数量按钮样式 - 去掉紫色背景 */
-.endpoint-count-btn {
-  color: #409eff !important;
-  background: transparent !important;
-  border: none !important;
-  padding: 0 !important;
-  font-size: 14px !important;
+/* 接口数量文本样式 - 纯数字可点击 */
+.endpoint-count-text {
+  color: #409eff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: color 0.2s;
 }
 
-.endpoint-count-btn:hover {
-  color: #66b1ff !important;
-  background: transparent !important;
-}
-
-:deep(.endpoint-count-btn) {
-  color: #409eff !important;
-  background: transparent !important;
-}
-
-:deep(.endpoint-count-btn:hover) {
-  color: #66b1ff !important;
-  background: transparent !important;
+.endpoint-count-text:hover {
+  color: #66b1ff;
+  text-decoration: underline;
 }
 
 /* 执行按钮红色背景 */
@@ -5056,7 +5543,7 @@ onMounted(async () => {
 .assertion-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 10px 12px;
   background: #f8fafc;
   border-radius: 6px;
@@ -5065,6 +5552,21 @@ onMounted(async () => {
 
 .assertion-row:hover {
   background: #f0f5ff;
+}
+
+/* Assertion 链接按钮去掉背景和立体感 */
+.assertion-row .el-button.is-link {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.assertion-row .el-button.is-link:hover,
+.assertion-row .el-button.is-link:focus {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
 }
 
 .assertion-type {
@@ -5087,14 +5589,6 @@ onMounted(async () => {
   min-width: 0;  /* 允许缩小 */
 }
 
-/* 断言新增按钮蓝色字体 */
-.assertion-row .el-button.is-link:not([type="danger"]) {
-  color: #409eff !important;
-}
-
-.assertion-row .el-button.is-link:not([type="danger"]):hover {
-  color: #66b1ff !important;
-}
 
 /* 收藏图标样式 */
 .favorite-icon {

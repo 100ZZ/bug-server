@@ -43,9 +43,9 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
-      path: '/apitest/codescan/:id',
-      name: 'CodeScanResult',
-      component: () => import('../views/CodeScanResultPage.vue'),
+      path: '/apitest/files',
+      name: 'FileManage',
+      component: () => import('../views/FileManagePage.vue'),
       meta: { requiresAuth: true }
     },
     {

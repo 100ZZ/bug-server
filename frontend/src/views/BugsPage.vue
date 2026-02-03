@@ -60,49 +60,39 @@
         :row-style="{ cursor: 'pointer' }"
         :max-height="600"
       >
-        <el-table-column label="编号" width="80" type="index" :index="(index) => index + 1" />
+        <el-table-column label="编号" width="70" type="index" align="center" />
         <el-table-column prop="project" label="项目" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.project?.name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="title" label="标题" show-overflow-tooltip />
-        <el-table-column prop="status" label="状态" show-overflow-tooltip>
+        <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="status" label="状态" align="center">
           <template #default="{ row }">
             <el-tag :type="getStatusTag(row.status)" size="small">{{ getStatusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="assignee" label="处理人" show-overflow-tooltip>
+        <el-table-column prop="assignee" label="处理人" show-overflow-tooltip align="center">
           <template #default="{ row }">
             {{ row.assignee?.display_name || row.assignee?.username || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="severity" label="严重程度" show-overflow-tooltip>
+        <el-table-column prop="severity" label="严重程度" align="center">
           <template #default="{ row }">
             <el-tag :type="getSeverityTag(row.severity)" size="small">{{ getSeverityLabel(row.severity) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-tag :type="getTypeTag(row.type)" size="small">{{ getTypeLabel(row.type) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="version" label="版本" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.version || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="priority" label="优先级" show-overflow-tooltip>
+        <el-table-column prop="priority" label="优先级" align="center">
           <template #default="{ row }">
             <el-tag :type="getPriorityTag(row.priority)" size="small">{{ getPriorityLabel(row.priority) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" show-overflow-tooltip>
+        <el-table-column prop="created_at" label="创建时间" width="175" align="center">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right" v-if="canUpdate('bugs') || canDelete('bugs')">
+        <el-table-column label="操作" align="center" v-if="canUpdate('bugs') || canDelete('bugs')">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button 
@@ -182,8 +172,8 @@
               <div v-if="pastedImages.length > 0" class="image-preview-area">
                 <div v-for="(img, index) in pastedImages" :key="index" class="image-item">
                   <el-image 
-                    :src="img" 
-                    :preview-src-list="pastedImages"
+                    :src="getImageUrl(img)" 
+                    :preview-src-list="pastedImages.map(getImageUrl)"
                     :initial-index="index"
                     fit="cover"
                     class="img-thumbnail"
@@ -355,7 +345,9 @@ const saving = ref(false)
 const drawerVisible = ref(false)
 const drawerTitle = ref('新建缺陷')
 const editingId = ref<number>()
-const pastedImages = ref<string[]>([])
+const editingBugKey = ref<string>()  // 当前编辑的缺陷编号
+const pastedImages = ref<string[]>([])  // 存储图片URL（服务器返回的相对路径）
+const pendingImageFiles = ref<File[]>([])  // 新建时暂存的待上传图片文件
 
 const filters = reactive({
   project_id: undefined,
@@ -461,8 +453,10 @@ const paginatedBugs = computed(() => {
 
 const handleCreate = () => {
   editingId.value = undefined
+  editingBugKey.value = undefined
   drawerTitle.value = '新建缺陷'
   pastedImages.value = []
+  pendingImageFiles.value = []
   Object.assign(formData, {
     project_id: hasProjectSelected.value ? getCurrentProjectId.value : undefined,
     title: '',
@@ -487,9 +481,11 @@ const handleCreate = () => {
 
 const handleEdit = (row: Bug) => {
   editingId.value = row.id
+  editingBugKey.value = row.bug_key
   drawerTitle.value = '编辑缺陷'
+  pendingImageFiles.value = []
   
-  // 加载已有的附件图片
+  // 加载已有的附件图片（现在存储的是URL路径）
   pastedImages.value = row.attachments ? [...row.attachments] : []
   
   // 转换数据类型
@@ -519,17 +515,45 @@ const handleSave = async () => {
 
   saving.value = true
   try {
-    // 将图片数组保存到 attachments 字段
-    const dataToSave = {
-      ...formData,
-      attachments: pastedImages.value
-    }
+    let bugKey = editingBugKey.value
     
     if (editingId.value) {
+      // 编辑模式：直接更新（图片已经在粘贴时上传了）
+      const dataToSave = {
+        ...formData,
+        attachments: pastedImages.value
+      }
       await bugApi.updateBug(editingId.value, dataToSave)
       ElMessage.success('更新成功')
     } else {
-      await bugApi.createBug(dataToSave)
+      // 新建模式：先创建缺陷，再上传图片
+      // 先创建不带附件的缺陷
+      const dataToSave = {
+        ...formData,
+        attachments: []
+      }
+      const createdBug = await bugApi.createBug(dataToSave)
+      bugKey = createdBug.bug_key
+      
+      // 上传所有待上传的图片
+      if (pendingImageFiles.value.length > 0) {
+        const uploadedUrls: string[] = []
+        for (const file of pendingImageFiles.value) {
+          try {
+            const result = await bugApi.uploadBugImage(bugKey, file)
+            uploadedUrls.push(result.url)
+          } catch (uploadError: any) {
+            console.error('图片上传失败:', uploadError)
+            ElMessage.warning('部分图片上传失败')
+          }
+        }
+        
+        // 更新缺陷的附件列表
+        if (uploadedUrls.length > 0) {
+          await bugApi.updateBug(createdBug.id, { attachments: uploadedUrls })
+        }
+      }
+      
       ElMessage.success('创建成功')
     }
     drawerVisible.value = false
@@ -544,7 +568,7 @@ const handleSave = async () => {
 }
 
 // 处理图片粘贴
-const handlePaste = (event: ClipboardEvent) => {
+const handlePaste = async (event: ClipboardEvent) => {
   const items = event.clipboardData?.items
   if (!items) return
   
@@ -553,20 +577,67 @@ const handlePaste = (event: ClipboardEvent) => {
     if (item.type.indexOf('image') !== -1) {
       const file = item.getAsFile()
       if (file) {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          const base64 = e.target?.result as string
-          pastedImages.value.push(base64)
-          ElMessage.success('图片已添加')
+        if (editingBugKey.value) {
+          // 编辑模式：直接上传图片到服务器
+          try {
+            const result = await bugApi.uploadBugImage(editingBugKey.value, file)
+            pastedImages.value.push(result.url)
+            ElMessage.success('图片已上传')
+          } catch (error: any) {
+            ElMessage.error('图片上传失败: ' + (error.message || '未知错误'))
+          }
+        } else {
+          // 新建模式：暂存文件，显示预览
+          pendingImageFiles.value.push(file)
+          // 生成本地预览URL
+          const previewUrl = URL.createObjectURL(file)
+          pastedImages.value.push(previewUrl)
+          ElMessage.success('图片已添加，将在保存时上传')
         }
-        reader.readAsDataURL(file)
       }
     }
   }
 }
 
+// 获取图片完整URL（处理相对路径）
+const getImageUrl = (url: string) => {
+  if (!url) return ''
+  // 如果是 blob: 开头的本地预览URL，直接返回
+  if (url.startsWith('blob:')) return url
+  // 如果是相对路径（以 /api/ 开头），添加基础URL
+  if (url.startsWith('/api/')) {
+    // 获取当前页面的 origin
+    return url
+  }
+  // 如果是完整URL或base64，直接返回
+  return url
+}
+
 // 删除粘贴的图片
-const removeImage = (index: number) => {
+const removeImage = async (index: number) => {
+  const imageUrl = pastedImages.value[index]
+  
+  // 如果是编辑模式且是服务器上的图片，需要调用删除接口
+  if (editingBugKey.value && imageUrl.startsWith('/api/bugs/')) {
+    try {
+      // 从URL中提取文件名
+      const filename = imageUrl.split('/').pop()
+      if (filename) {
+        await bugApi.deleteBugImage(editingBugKey.value, filename)
+      }
+    } catch (error: any) {
+      console.error('删除图片失败:', error)
+      // 即使删除失败也从列表中移除
+    }
+  }
+  
+  // 如果是本地预览URL，释放内存
+  if (imageUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(imageUrl)
+    // 同时从待上传列表中移除对应的文件
+    pendingImageFiles.value.splice(index, 1)
+  }
+  
   pastedImages.value.splice(index, 1)
   ElMessage.info('图片已删除')
 }
@@ -798,6 +869,7 @@ onMounted(async () => {
 :deep(.el-table) {
   border-radius: 12px;
   overflow: hidden;
+  font-size: 14px;
 }
 
 :deep(.el-table__header) {
@@ -809,33 +881,49 @@ onMounted(async () => {
   color: #495057;
   font-weight: 600;
   border-bottom: 2px solid #dee2e6;
-  padding: 16px 0;
+  padding: 14px 8px;
+}
+
+:deep(.el-table__header th .cell) {
+  text-align: center;
+  padding: 0 4px;
 }
 
 :deep(.el-table__body tr) {
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease;
 }
 
 :deep(.el-table__body tr:hover) {
   background: #f8f9ff !important;
-  transform: scale(1.01);
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
 }
 
 :deep(.el-table__body td) {
-  padding: 16px 0;
+  padding: 12px 8px;
   border-bottom: 1px solid #f0f2f5;
+}
+
+:deep(.el-table__body td .cell) {
+  line-height: 1.5;
 }
 
 :deep(.el-table--striped .el-table__body tr.el-table__row--striped) {
   background: #fafbfc;
 }
 
+/* 操作列样式 */
+.table-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
 :deep(.el-tag) {
   border-radius: 6px;
   font-weight: 500;
-  padding: 4px 12px;
+  padding: 2px 8px;
   border: none;
+  font-size: 12px;
 }
 
 /* 操作栏按钮美化 - 编辑和执行使用紫色系，删除保留红色，无背景色 */

@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # MySQL 8.x 数据库服务
+  # MySQL 8.x 数据库服务（为 bug_management 提供数据库）
   mysql:
     image: ${MYSQL_IMAGE:-100zz/test-mysql:8.0.20}
     container_name: bug-server-mysql${CONTAINER_SUFFIX:-}
@@ -22,6 +22,8 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --default-authentication-plugin=mysql_native_password
+      - --sort_buffer_size=8M
+      - --max_sort_length=8192
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-Test@123456}"]
       interval: 10s
@@ -44,12 +46,21 @@ services:
       DB_USER: ${MYSQL_USER:-buguser}
       DB_PASSWORD: ${MYSQL_PASSWORD:-Test@123456}
       DB_NAME: ${MYSQL_DATABASE:-bug_management}
-      SONAR_URL: ${SONAR_URL:-http://sonarqube:9000}
-      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      # 文件上传目录配置（Docker 环境映射到宿主机目录）
+      UPLOAD_DIR: /data/uploads
+      # 缺陷图片目录配置（Docker 环境映射到宿主机目录）
+      BUG_IMAGE_DIR: /data/images
+      TZ: Asia/Shanghai
     ports:
       - "${BACKEND_PORT:-43211}:43211"
     volumes:
       - ../backend:/app
+      # 文件上传持久化存储 - 映射到宿主机目录，方便直接查看
+      # 目录结构：/opt/bug-uploads/local/ 和 /opt/bug-uploads/flow/
+      - ${UPLOAD_HOST_DIR:-/opt/bug-uploads}:/data/uploads
+      # 缺陷图片持久化存储 - 映射到宿主机目录
+      # 目录结构：/opt/bug-images/{缺陷编号}/{图片文件}
+      - ${BUG_IMAGE_DIR:-/opt/bug-images}:/data/images
     depends_on:
       - mysql
     networks:
@@ -80,46 +91,14 @@ services:
       - bug-server-network
     command: npm run dev -- --host 0.0.0.0
 
-  # SonarQube 代码质量扫描服务
-  sonarqube:
-    image: 100zz/sonarqube:7.7-community
-    container_name: bug-server-sonarqube${CONTAINER_SUFFIX:-}
-    restart: always
-    user: "999:999"
-    environment:
-      SONAR_JDBC_URL: jdbc:mysql://mysql:3306/${SONAR_DB_NAME:-sonarqube}?useUnicode=true&characterEncoding=utf8&rewriteBatchedStatements=true&useConfigs=maxPerformance&useSSL=false
-      SONAR_JDBC_USERNAME: ${MYSQL_USER:-buguser}
-      SONAR_JDBC_PASSWORD: ${MYSQL_PASSWORD:-Test@123456}
-      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
-      TZ: Asia/Shanghai
-    ports:
-      - "${SONAR_PORT:-9000}:9000"
-    volumes:
-      - bug_sonarqube_data:/opt/sonarqube/data
-      - bug_sonarqube_extensions:/opt/sonarqube/extensions
-      - bug_sonarqube_logs:/opt/sonarqube/logs
-    depends_on:
-      - mysql
-    networks:
-      - bug-server-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/api/system/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
 volumes:
   bug_mysql_data:
-    driver: local
-  bug_sonarqube_data:
-    driver: local
-  bug_sonarqube_extensions:
-    driver: local
-  bug_sonarqube_logs:
     driver: local
 
 networks:
   bug-server-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.8.0.0/24
 

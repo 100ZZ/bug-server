@@ -49,21 +49,21 @@
         :max-height="600"
         row-key="id"
       >
-        <el-table-column label="编号" width="80" type="index" :index="(index: number) => index + 1" />
-        <el-table-column prop="project" label="项目" show-overflow-tooltip>
+        <el-table-column label="编号" width="80" type="index" :index="(index: number) => index + 1" align="center" />
+        <el-table-column prop="project" label="项目" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.project?.name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="环境名称" show-overflow-tooltip />
-        <el-table-column prop="description" label="环境说明" show-overflow-tooltip />
-        <el-table-column prop="base_url" label="环境信息" show-overflow-tooltip />
-        <el-table-column prop="created_at" label="创建时间" width="180" show-overflow-tooltip>
+        <el-table-column prop="name" label="环境名称" align="center" show-overflow-tooltip />
+        <el-table-column prop="description" label="环境说明" align="center" show-overflow-tooltip />
+        <el-table-column prop="base_url" label="环境信息" align="center" show-overflow-tooltip />
+        <el-table-column prop="created_at" label="创建时间" width="180" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="180" fixed="right" align="center">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button link type="primary" @click="handleEdit(row)">
@@ -353,6 +353,8 @@ onMounted(async () => {
 .api-environment-page {
   height: 100%;
   animation: fadeIn 0.5s ease-in;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 @keyframes fadeIn {

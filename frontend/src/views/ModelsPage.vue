@@ -31,21 +31,21 @@
     <!-- 底部：模型列表 -->
     <el-card class="table-card">
       <el-table :data="paginatedModels" v-loading="loading" :max-height="600">
-        <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" />
-        <el-table-column prop="name" label="模型名称" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="provider" label="提供商" width="120">
+        <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" align="center" />
+        <el-table-column prop="name" label="模型名称" min-width="150" align="center" show-overflow-tooltip />
+        <el-table-column prop="provider" label="提供商" width="120" align="center">
           <template #default="{ row }">
             <el-tag :type="getProviderTag(row.provider)">{{ getProviderLabel(row.provider) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" width="100">
+        <el-table-column prop="type" label="类型" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.type === 'api' ? 'success' : 'info'">
               {{ row.type === 'api' ? 'API' : '本地' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="model_name" label="模型标识" min-width="150" show-overflow-tooltip>
+        <el-table-column prop="model_name" label="模型标识" min-width="150" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.model_name || '-' }}
           </template>
@@ -56,15 +56,15 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : 'info'">
               {{ row.status === 'active' ? '启用' : '禁用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column prop="description" label="描述" min-width="200" align="center" show-overflow-tooltip />
+        <el-table-column label="操作" width="200" fixed="right" align="center">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button 

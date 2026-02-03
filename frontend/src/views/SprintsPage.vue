@@ -58,33 +58,33 @@
         style="width: 100%"
         stripe
       >
-        <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" />
-        <el-table-column prop="name" label="名称" min-width="180" />
-        <el-table-column label="项目" min-width="150">
+        <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" align="center" />
+        <el-table-column prop="name" label="名称" min-width="180" align="center" />
+        <el-table-column label="项目" min-width="150" align="center">
           <template #default="{ row }">
             {{ row.project?.name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="goal" label="目标" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="owner" label="负责人" min-width="120" />
-        <el-table-column label="状态" width="100">
+        <el-table-column prop="goal" label="目标" min-width="200" align="center" show-overflow-tooltip />
+        <el-table-column prop="owner" label="负责人" min-width="120" align="center" />
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row)" size="small">
               {{ getStatusLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="start_date" label="起始时间" width="120">
+        <el-table-column prop="start_date" label="起始时间" width="120" align="center">
           <template #default="{ row }">
             {{ formatDate(row.start_date) }}
           </template>
         </el-table-column>
-        <el-table-column prop="end_date" label="截止时间" width="120">
+        <el-table-column prop="end_date" label="截止时间" width="120" align="center">
           <template #default="{ row }">
             {{ formatDate(row.end_date) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right" v-if="canUpdate('projects') || canDelete('projects')">
+        <el-table-column label="操作" width="180" fixed="right" align="center" v-if="canUpdate('projects') || canDelete('projects')">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button 

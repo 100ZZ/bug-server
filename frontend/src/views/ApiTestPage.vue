@@ -405,8 +405,7 @@
               <el-input
                 v-model="headersText"
                 type="textarea"
-                class="param-textarea"
-                :autosize="{ minRows: 12, maxRows: 30 }"
+                class="param-textarea param-textarea-fixed"
                 placeholder='JSON格式，例如：{"Authorization": "Bearer token"}'
               />
             </el-tab-pane>
@@ -414,8 +413,7 @@
               <el-input
                 v-model="queryParamsText"
                 type="textarea"
-                class="param-textarea"
-                :autosize="{ minRows: 12, maxRows: 30 }"
+                class="param-textarea param-textarea-fixed"
                 placeholder='JSON格式，例如：{"page": 1, "size": 10}'
               />
             </el-tab-pane>
@@ -423,8 +421,7 @@
               <el-input
                 v-model="bodyText"
                 type="textarea"
-                class="param-textarea"
-                :autosize="{ minRows: 15, maxRows: 35 }"
+                class="param-textarea param-textarea-fixed"
                 placeholder='JSON格式，例如：{"name": "test", "age": 18}'
               />
             </el-tab-pane>
@@ -432,8 +429,7 @@
               <el-input
                 v-model="pathParamsText"
                 type="textarea"
-                class="param-textarea"
-                :autosize="{ minRows: 12, maxRows: 30 }"
+                class="param-textarea param-textarea-fixed"
                 placeholder='JSON格式，例如：{"id": 123}'
               />
             </el-tab-pane>
@@ -471,20 +467,8 @@
                     class="assertion-value"
                     placeholder="期望值，例如：200"
                   />
-                  <el-button
-                    type="primary"
-                    link
-                    @click="addAssertion(index)"
-                  >
-                    新增
-                  </el-button>
-                  <el-button
-                    type="danger"
-                    link
-                    @click="removeAssertion(index)"
-                  >
-                    删除
-                  </el-button>
+                  <el-button link type="danger" @click="removeAssertion(index)">删除</el-button>
+                  <el-button link type="primary" @click="addAssertion(index)">新增</el-button>
                 </div>
               </div>
             </el-tab-pane>
@@ -616,7 +600,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, UploadFilled, View, Delete, Star, StarFilled, Connection, VideoCamera, Setting } from '@element-plus/icons-vue'
+import { Search, Refresh, UploadFilled, View, Delete, Star, StarFilled, Connection, VideoCamera, Setting, Plus } from '@element-plus/icons-vue'
 import * as apitestApi from '../api/apitest'
 import * as projectApi from '../api/projects'
 import { useProjectContext } from '../composables/useProjectContext'
@@ -1647,6 +1631,28 @@ const handleSave = async () => {
 
     // 刷新测试数据列表
     await loadTestData(selectedEndpoint.value.id)
+    
+    // 保存成功后，重新格式化显示（2空格缩进）
+    if (pathParams && typeof pathParams === 'object') {
+      pathParamsText.value = Object.keys(pathParams).length > 0 
+        ? JSON.stringify(pathParams, null, 2) 
+        : formatEmptyObject()
+    }
+    if (queryParams && typeof queryParams === 'object') {
+      queryParamsText.value = Object.keys(queryParams).length > 0 
+        ? JSON.stringify(queryParams, null, 2) 
+        : formatEmptyObject()
+    }
+    if (headers && typeof headers === 'object') {
+      headersText.value = Object.keys(headers).length > 0 
+        ? JSON.stringify(headers, null, 2) 
+        : formatEmptyObject()
+    }
+    if (body && typeof body === 'object') {
+      bodyText.value = (Object.keys(body).length > 0 || Array.isArray(body))
+        ? JSON.stringify(body, null, 2) 
+        : formatEmptyObject()
+    }
   } catch (error: any) {
     ElMessage.error(error.message || '保存失败')
   }
@@ -1994,7 +2000,7 @@ pre {
 .assertion-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 10px 12px;
   background: #f8fafc;
   border-radius: 6px;
@@ -2003,6 +2009,21 @@ pre {
 
 .assertion-row:hover {
   background: #f0f5ff;
+}
+
+/* Assertion 链接按钮去掉背景和立体感 */
+.assertion-row .el-button.is-link {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.assertion-row .el-button.is-link:hover,
+.assertion-row .el-button.is-link:focus {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
 }
 
 .assertion-type {
@@ -2024,6 +2045,7 @@ pre {
   flex: 1;  /* 占据剩余空间，对于JSON路径行，与JSON路径输入框平分 */
   min-width: 0;  /* 允许缩小 */
 }
+
 
 /* 执行接口抽屉布局 */
 .env-form {
@@ -2057,6 +2079,11 @@ pre {
   background: linear-gradient(135deg, #f8fafc 0%, #f0f4f8 100%);
 }
 
+.execute-drawer-content :deep(.el-card) {
+  border: none !important;
+  box-shadow: none !important;
+}
+
 .execute-left {
   flex: 1;
   overflow-y: auto;
@@ -2065,7 +2092,8 @@ pre {
   background: white;
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .execute-right {
@@ -2076,7 +2104,8 @@ pre {
   background: white;
   border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .no-response {
@@ -2349,5 +2378,12 @@ pre {
   font-size: 13px;
   color: #909399;
   line-height: 1.5;
+}
+
+/* 固定高度的参数输入框 */
+.param-textarea-fixed :deep(textarea) {
+  height: 400px !important;
+  min-height: 400px !important;
+  max-height: 400px !important;
 }
 </style>

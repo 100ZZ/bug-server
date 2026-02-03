@@ -115,6 +115,45 @@ echo "✅ 镜像标签: ${IMAGE_TAG:-latest}（可在 .env 中手动修改 IMAGE
 echo "✅ 容器名称后缀: $CONTAINER_SUFFIX"
 echo ""
 
+# 读取上传目录配置（默认为 /opt/bug-uploads）
+UPLOAD_HOST_DIR=$(grep -E "^UPLOAD_HOST_DIR=" .env 2>/dev/null | cut -d'=' -f2 || echo "/opt/bug-uploads")
+if [ -z "$UPLOAD_HOST_DIR" ]; then
+    UPLOAD_HOST_DIR="/opt/bug-uploads"
+fi
+
+# 读取图片目录配置（默认为 /opt/bug-images）
+BUG_IMAGE_DIR=$(grep -E "^BUG_IMAGE_DIR=" .env 2>/dev/null | cut -d'=' -f2 || echo "/opt/bug-images")
+if [ -z "$BUG_IMAGE_DIR" ]; then
+    BUG_IMAGE_DIR="/opt/bug-images"
+fi
+
+# 创建上传文件目录
+echo "📁 创建文件上传目录..."
+if [ -d "$UPLOAD_HOST_DIR" ]; then
+    echo "   目录已存在: $UPLOAD_HOST_DIR"
+else
+    sudo mkdir -p "$UPLOAD_HOST_DIR/local" "$UPLOAD_HOST_DIR/flow" 2>/dev/null || mkdir -p "$UPLOAD_HOST_DIR/local" "$UPLOAD_HOST_DIR/flow"
+    echo "   ✅ 已创建: $UPLOAD_HOST_DIR/local/"
+    echo "   ✅ 已创建: $UPLOAD_HOST_DIR/flow/"
+fi
+
+# 创建缺陷图片目录
+echo "📁 创建缺陷图片目录..."
+if [ -d "$BUG_IMAGE_DIR" ]; then
+    echo "   目录已存在: $BUG_IMAGE_DIR"
+else
+    sudo mkdir -p "$BUG_IMAGE_DIR" 2>/dev/null || mkdir -p "$BUG_IMAGE_DIR"
+    echo "   ✅ 已创建: $BUG_IMAGE_DIR/"
+fi
+
+# 设置目录权限
+echo "🔐 设置目录权限..."
+sudo chmod -R 777 "$UPLOAD_HOST_DIR" 2>/dev/null || chmod -R 777 "$UPLOAD_HOST_DIR" 2>/dev/null || true
+echo "   ✅ 已设置权限: $UPLOAD_HOST_DIR"
+sudo chmod -R 777 "$BUG_IMAGE_DIR" 2>/dev/null || chmod -R 777 "$BUG_IMAGE_DIR" 2>/dev/null || true
+echo "   ✅ 已设置权限: $BUG_IMAGE_DIR"
+echo ""
+
 # 停止现有容器（如果存在）
 echo "🛑 停止现有容器..."
 docker-compose down 2>/dev/null || true
@@ -145,6 +184,11 @@ echo "🌐 访问地址:"
 echo "   - 前端: http://localhost:11234"
 echo "   - 后端 API: http://localhost:43211"
 echo "   - API 文档: http://localhost:43211/docs"
+echo ""
+echo "📁 文件存储目录:"
+echo "   - 本地上传: $UPLOAD_HOST_DIR/local/"
+echo "   - 流程导出: $UPLOAD_HOST_DIR/flow/"
+echo "   - 缺陷图片: $BUG_IMAGE_DIR/{缺陷编号}/"
 echo ""
 echo "📝 查看日志:"
 echo "   docker-compose logs -f"

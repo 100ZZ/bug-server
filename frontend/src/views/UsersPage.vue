@@ -35,11 +35,11 @@
     <!-- 底部：用户列表 -->
     <el-card class="table-card">
       <el-table :data="paginatedUsers" v-loading="loading" :max-height="600">
-        <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" />
-        <el-table-column prop="username" label="用户名" />
-        <el-table-column prop="display_name" label="显示名称" />
-        <el-table-column prop="email" label="邮箱" />
-        <el-table-column prop="roles" label="角色" width="200">
+        <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" align="center" />
+        <el-table-column prop="username" label="用户名" align="center" />
+        <el-table-column prop="display_name" label="显示名称" align="center" />
+        <el-table-column prop="email" label="邮箱" align="center" />
+        <el-table-column prop="roles" label="角色" width="200" align="center">
           <template #default="{ row }">
             <el-tag v-for="role in (row.roles || [])" :key="role" style="margin-right: 4px; margin-bottom: 4px;">
               {{ getRoleLabel(role) }}
@@ -47,14 +47,14 @@
             <span v-if="!row.roles || row.roles.length === 0" style="color: #909399;">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : 'info'">
               {{ row.status === 'active' ? '活跃' : '禁用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right" v-if="canUpdate('users') || canDelete('users')">
+        <el-table-column label="操作" width="180" fixed="right" align="center" v-if="canUpdate('users') || canDelete('users')">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button 

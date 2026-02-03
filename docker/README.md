@@ -86,8 +86,8 @@ docker-compose down -v
 
 **ARM64/aarch64 架构：**
 - **MySQL**: `100zz/test-mysql:8.0.39-arm64v8`
-- **Python**: `python:3.12-slim`（使用官方镜像）
-- **Node.js**: `node:22-alpine`（使用官方镜像）
+- **Python**: `100zz/test-python:3.12-slim`
+- **Node.js**: `100zz/test-node:22-alpine`
 
 启动脚本会自动检测架构并设置正确的镜像，也可在 `.env` 文件中手动指定 `MYSQL_IMAGE`。
 
@@ -103,9 +103,7 @@ docker-compose down -v
 ### 后端服务
 - **容器名**: `bug-server-backend-YYYYMMDD-HHMMSS`（自动添加时间戳后缀）
 - **镜像名**: `bug-backend:${IMAGE_TAG}`（标签在 `.env` 中手动指定，默认为 `latest`）
-- **基础镜像**: 
-  - x86: `100zz/test-python:3.12-slim`
-  - ARM: `python:3.12-slim`
+- **基础镜像**: `100zz/test-python:3.12-slim`
 - **端口**: 43211（可通过 `.env` 中的 `BACKEND_PORT` 修改）
 - **技术栈**: FastAPI + Python 3.12
 - **热重载**: 已启用（代码修改自动重启）
@@ -113,9 +111,7 @@ docker-compose down -v
 ### 前端服务
 - **容器名**: `bug-server-frontend-YYYYMMDD-HHMMSS`（自动添加时间戳后缀）
 - **镜像名**: `bug-frontend:${IMAGE_TAG}`（标签在 `.env` 中手动指定，默认为 `latest`）
-- **基础镜像**: 
-  - x86: `100zz/test-node:22-alpine`
-  - ARM: `node:22-alpine`
+- **基础镜像**: `100zz/test-node:22-alpine`
 - **端口**: 11234（可通过 `.env` 中的 `FRONTEND_PORT` 修改）
 - **技术栈**: Vue 3 + Vite
 - **热重载**: 已启用（代码修改自动刷新）
@@ -149,10 +145,17 @@ docker-compose down -v
 | YARN_REGISTRY | yarn 镜像源（如果无法访问外网） | 空（使用官方源） |
 | BACKEND_PORT | 后端服务端口映射 | 43211 |
 | FRONTEND_PORT | 前端服务端口映射 | 11234 |
+| UPLOAD_HOST_DIR | 文件上传目录（宿主机路径） | /opt/bug-uploads |
+| BUG_IMAGE_DIR | 缺陷图片目录（宿主机路径） | /opt/bug-images |
+| CODE_SCAN_DIR | 代码扫描目录（宿主机路径） | /opt/code |
+| SONAR_URL | 外部 SonarQube 服务地址（扫描页面调用） | 按实际填写 |
+| SONAR_TOKEN | 外部 SonarQube 认证 Token（可选） | 按实际填写 |
 
 ## 数据持久化
 
-MySQL 数据存储在 Docker 数据卷 `mysql_data` 中，即使删除容器，数据也不会丢失。
+### 数据库
+
+MySQL 数据存储在 Docker 数据卷 `bug_mysql_data` 中，即使删除容器，数据也不会丢失。
 
 如需备份数据：
 
@@ -162,6 +165,142 @@ docker exec bug-server-mysql mysqldump -u root -p${MYSQL_ROOT_PASSWORD} bug_mana
 
 # 恢复
 docker exec -i bug-server-mysql mysql -u root -p${MYSQL_ROOT_PASSWORD} bug_management < backup.sql
+```
+
+### 上传文件
+
+文件管理功能（本地上传、流程导出）的文件**直接映射到宿主机目录**，方便随时查看和备份。
+
+**默认存储路径：** `/opt/bug-uploads/`（可通过 `.env` 中的 `UPLOAD_HOST_DIR` 修改）
+
+**目录结构（按文件类型和名称组织）：**
+```
+/opt/bug-uploads/
+├── local/                        # 本地上传的文件
+│   ├── 测试数据1/                # 文件管理中设置的"名称"
+│   │   └── a1b2c3d4e5f6.json    # 实际文件（UUID命名）
+│   ├── 用户信息/
+│   │   └── x9y8z7w6v5u4.csv
+│   └── ...
+└── flow/                         # 流程导出的文件
+    ├── 登录流程/
+    │   └── f1e2d3c4b5a6.json
+    ├── 订单流程/
+    │   └── b5a6c7d8e9f0.json
+    └── ...
+```
+
+| 存储类型 | 宿主机路径 | 容器内路径 | 说明 |
+|----------|-----------|-----------|------|
+| MySQL 数据 | Docker 卷 | `/var/lib/mysql` | 使用 Docker 数据卷 |
+| 上传文件 | `/opt/bug-uploads/` | `/data/uploads/` | 直接映射到宿主机目录 |
+| 缺陷图片 | `/opt/bug-images/` | `/data/images/` | 直接映射到宿主机目录 |
+
+**首次部署前，请确保宿主机目录存在并有正确权限：**
+
+```bash
+# 创建目录
+sudo mkdir -p /opt/bug-uploads/local /opt/bug-uploads/flow
+sudo mkdir -p /opt/bug-images
+
+# 设置权限（确保容器内进程可以读写）
+sudo chmod -R 777 /opt/bug-uploads
+sudo chmod -R 777 /opt/bug-images
+```
+
+**查看上传的文件：**
+
+```bash
+# 查看所有上传的文件
+ls -la /opt/bug-uploads/
+
+# 查看本地上传的文件（按名称分文件夹）
+ls -la /opt/bug-uploads/local/
+
+# 查看流程导出的文件（按名称分文件夹）
+ls -la /opt/bug-uploads/flow/
+
+# 查看某个文件夹下的文件
+ls -la /opt/bug-uploads/flow/登录流程/
+
+# 查看某个 JSON 文件内容（格式化输出）
+cat /opt/bug-uploads/flow/登录流程/xxxxx.json | python -m json.tool
+```
+
+**备份上传文件：**
+
+```bash
+# 直接打包宿主机目录
+tar czf bug-uploads-backup.tar.gz -C /opt bug-uploads
+
+# 恢复
+tar xzf bug-uploads-backup.tar.gz -C /opt
+```
+
+### 缺陷图片
+
+缺陷截图**直接映射到宿主机目录**，不再存储在数据库中，避免数据库过大导致性能问题。
+
+**默认存储路径：** `/opt/bug-images/`（可通过 `.env` 中的 `BUG_IMAGE_DIR` 修改）
+
+**目录结构：**
+```
+/opt/bug-images/
+├── BUG-001/                  # 以缺陷编号为文件夹名称
+│   ├── a1b2c3d4.png
+│   └── x9y8z7w6.jpg
+├── BUG-002/
+│   └── ...
+└── ...
+```
+
+**查看缺陷图片：**
+
+```bash
+# 查看所有缺陷图片
+ls -la /opt/bug-images/
+
+# 查看某个缺陷的图片
+ls -la /opt/bug-images/BUG-001/
+```
+
+**备份缺陷图片：**
+
+```bash
+# 直接打包宿主机目录
+tar czf bug-images-backup.tar.gz -C /opt bug-images
+
+# 恢复
+tar xzf bug-images-backup.tar.gz -C /opt
+```
+
+### 代码扫描目录与外部 SonarQube
+
+扫描功能**不部署 SonarQube 容器**，通过配置的**外部 SonarQube 服务**执行扫描。请在 `.env` 中设置 `SONAR_URL`、`SONAR_TOKEN`（或在后端/前端配置中指定），扫描页面会调用该地址。
+
+代码目录需映射到宿主机，默认 `/opt/code` 映射到容器内（若扫描任务在容器内执行则需此映射；若仅由外部 Sonar 扫描则按实际需求配置）。
+
+**配置方式：**
+
+1. 将待扫描的代码放到 `/opt/code` 目录下（如需在宿主机上被扫描）：
+```bash
+# 例如
+/opt/code/
+├── arcana-saas/          # 项目1
+├── my-java-project/      # 项目2
+└── ...
+```
+
+2. 新增扫描任务时，路径填写容器内路径（与宿主机路径相同）：
+```
+扫描路径: /opt/code/arcana-saas
+```
+
+**自定义扫描目录：**
+
+如需修改映射目录，编辑 `.env` 文件：
+```bash
+CODE_SCAN_DIR=/your/custom/path
 ```
 
 ## 开发模式

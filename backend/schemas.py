@@ -511,8 +511,24 @@ class TestTask(TestTaskBase):
         from_attributes = True
 
 
+class HeaderReplacement(BaseModel):
+    """Header 替换配置"""
+    key: str
+    value: str
+
+
+class AssertionReplacement(BaseModel):
+    """断言替换配置"""
+    type: str  # status_code, json_path, response_time, contains
+    target: Optional[str] = None  # json_path 时需要
+    operator: str  # eq, ne, gt, gte, lt, lte, contains, not_contains
+    expected: Any
+
+
 class TestTaskExecutionRequest(BaseModel):
     environment_id: int
+    header_replacements: Optional[List[HeaderReplacement]] = None  # Header 替换列表
+    assertion_replacements: Optional[List[AssertionReplacement]] = None  # 断言替换列表
 
 
 class TestTaskExecutionResult(BaseModel):
@@ -526,7 +542,25 @@ class TestTaskExecutionResult(BaseModel):
     details: Optional[Dict[str, Any]] = None
 
 
+class TestTaskExecutionSummary(BaseModel):
+    """执行记录摘要（不包含详细结果，用于列表查询）"""
+    id: int
+    task_id: int
+    environment_id: Optional[int] = None
+    status: str  # 'running', 'success', 'failed'
+    total_count: int
+    success_count: int
+    failed_count: int
+    error_message: Optional[str] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class TestTaskExecution(BaseModel):
+    """执行记录详情（包含完整结果）"""
     id: int
     task_id: int
     environment_id: Optional[int] = None
@@ -573,6 +607,7 @@ class FlowExecuteRequest(BaseModel):
     environment_id: Optional[int] = None
     global_variables: Optional[Dict[str, Any]] = None
     failAction: Optional[str] = "stop"  # 执行失败时的行为：stop 或 continue
+    delay: Optional[int] = 0  # 步骤间延迟（毫秒），0表示不延迟
 
 
 # ===== Record API Request Schema =====
@@ -633,6 +668,7 @@ class CodeScan(CodeScanBase):
     id: int
     scan_time: Optional[datetime] = None
     result: Optional[str] = None
+    error_message: Optional[str] = None  # 扫描不通过的原因或错误信息
     created_at: datetime
     updated_at: datetime
     project: Optional[Project] = None
@@ -642,11 +678,8 @@ class CodeScan(CodeScanBase):
 
 class CodeScanResultBase(BaseModel):
     scan_id: int
-    issues: Optional[Dict[str, Any]] = None
-    metrics: Optional[Dict[str, Any]] = None
-    status: str = 'running'
+    status: str = 'pending'
     error_message: Optional[str] = None
-    scan_output: Optional[str] = None
 
 class CodeScanResultCreate(CodeScanResultBase):
     pass
@@ -747,3 +780,44 @@ class TestCaseReview(TestCaseReviewBase):
 
     class Config:
         from_attributes = True
+
+
+# ==================== 测试文件管理 ====================
+
+class TestFileBase(BaseModel):
+    """测试文件基础模型"""
+    name: str
+    description: Optional[str] = None
+    file_type: str = 'local'  # flow 或 local
+
+class TestFileCreate(TestFileBase):
+    """创建测试文件"""
+    file_name: Optional[str] = None
+    file_content: Optional[Any] = None  # 流程导出时使用
+    flow_id: Optional[int] = None
+
+class TestFileUpdate(BaseModel):
+    """更新测试文件"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+class TestFile(TestFileBase):
+    """测试文件响应模型"""
+    id: int
+    file_name: str
+    file_path: Optional[str] = None
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    flow_id: Optional[int] = None
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    creator: Optional[User] = None
+
+    class Config:
+        from_attributes = True
+
+class TestFileList(BaseModel):
+    """测试文件列表响应"""
+    items: List[TestFile]
+    total: int

@@ -41,11 +41,11 @@
         style="width: 100%"
         stripe
       >
-      <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" />
-      <el-table-column prop="name" label="项目名称" min-width="180" />
-      <el-table-column prop="key" label="简称" min-width="180" />
-      <el-table-column prop="lead" label="负责人" min-width="120" />
-      <el-table-column label="项目成员" min-width="200">
+      <el-table-column label="编号" width="80" type="index" :index="(index) => (currentPage - 1) * pageSize + index + 1" align="center" />
+      <el-table-column prop="name" label="项目名称" min-width="180" align="center" />
+      <el-table-column prop="key" label="简称" min-width="180" align="center" />
+      <el-table-column prop="lead" label="负责人" min-width="120" align="center" />
+      <el-table-column label="项目成员" min-width="200" align="center">
         <template #default="{ row }">
           <div class="member-tags">
             <el-tag v-for="member in (row.members || [])" :key="member.id" size="small" type="info">
@@ -55,7 +55,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right" v-if="canUpdate('projects') || canDelete('projects')">
+      <el-table-column label="操作" width="180" fixed="right" align="center" v-if="canUpdate('projects') || canDelete('projects')">
         <template #default="{ row }">
           <div class="table-actions">
             <el-button 

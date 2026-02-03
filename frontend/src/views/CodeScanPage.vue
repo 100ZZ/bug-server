@@ -31,10 +31,6 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-select v-model="filters.result" placeholder="扫描结果" clearable @change="loadScans" style="width: 150px">
-          <el-option label="通过" value="passed" />
-          <el-option label="不通过" value="failed" />
-        </el-select>
         <el-button @click="loadScans">搜索</el-button>
         <el-button @click="handleReset">重置</el-button>
         <el-button type="primary" @click="handleCreate">
@@ -54,82 +50,76 @@
         :max-height="600"
         row-key="id"
       >
-        <el-table-column label="编号" width="80" type="index" :index="(index: number) => index + 1" />
-        <el-table-column prop="project" label="项目" show-overflow-tooltip>
+        <el-table-column label="编号" width="80" type="index" :index="(index: number) => index + 1" align="center" />
+        <el-table-column prop="project" label="项目" show-overflow-tooltip align="center">
           <template #default="{ row }">
             {{ row.project?.name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="project_name" label="工程" show-overflow-tooltip />
-        <el-table-column prop="branch" label="分支" show-overflow-tooltip />
+        <el-table-column prop="project_name" label="工程" show-overflow-tooltip align="center" />
+        <el-table-column prop="branch" label="分支" show-overflow-tooltip align="center" />
         <el-table-column prop="language" label="编程语言" width="120" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.language || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="scan_path" label="扫描路径" show-overflow-tooltip />
-        <el-table-column prop="scan_time" label="扫描时间" width="180" show-overflow-tooltip>
+        <el-table-column prop="scan_path" label="扫描路径" show-overflow-tooltip align="center" />
+        <el-table-column prop="sonar_host" label="Sonar Host" show-overflow-tooltip align="center">
           <template #default="{ row }">
-            {{ formatDate(row.scan_time) }}
+            {{ row.sonar_host || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="result" label="扫描结果" width="120" align="center">
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-popover
+            <el-tag v-if="scanningIds.has(row.id)" type="warning">扫描中</el-tag>
+            <el-tag v-else-if="row.result === 'passed'" type="success">通过</el-tag>
+            <el-tooltip 
+              v-else-if="row.result === 'failed'" 
+              :content="truncateText(row.error_message || '扫描不通过', 100)" 
               placement="top"
-              :width="400"
-              trigger="hover"
-              v-if="getScanStatus(row) === 'scanning' || (getScanStatus(row) === 'failed' && getScanErrorMessage(row))"
+              :show-after="300"
             >
-              <template #reference>
-                <el-tag :type="getResultTagType(row)">
-                  {{ getResultText(row) }}
-                </el-tag>
-              </template>
-              <div class="scan-detail-popover">
-                <div class="detail-title">扫描详情</div>
-                <div class="detail-content">
-                  <div v-if="getScanStatus(row) === 'scanning'">
-                    <div><strong>状态：</strong>扫描中</div>
-                    <div style="margin-top: 8px; color: #909399;">请稍候，扫描完成后将显示结果...</div>
-                  </div>
-                  <div v-else-if="getScanStatus(row) === 'failed' && getScanErrorMessage(row)">
-                    <div><strong>状态：</strong>扫描失败</div>
-                    <div style="margin-top: 8px;"><strong>错误信息：</strong></div>
-                    <div style="margin-top: 4px; color: #f56c6c; white-space: pre-wrap; font-size: 12px; max-height: 300px; overflow-y: auto;">
-                      {{ getScanErrorMessage(row) }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </el-popover>
-            <el-tag v-else :type="getResultTagType(row)">
-              {{ getResultText(row) }}
-            </el-tag>
+              <el-tag type="danger" style="cursor: help;">不通过</el-tag>
+            </el-tooltip>
+            <el-tag v-else type="info">未扫描</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right" align="center">
           <template #default="{ row }">
             <div class="table-actions">
-              <div class="action-row">
-              <el-button link type="primary" @click="handleScan(row)" :loading="row.scanning">
-                <el-icon><VideoPlay /></el-icon>
-                扫描
-              </el-button>
-              <el-button link type="primary" @click="handleViewDetail(row)">
-                <el-icon><View /></el-icon>
-                详情
-              </el-button>
-              </div>
               <div class="action-row">
                 <el-button link type="primary" @click="handleEdit(row)">
                   <el-icon><EditPen /></el-icon>
                   编辑
                 </el-button>
-              <el-button link type="danger" @click="handleDelete(row)">
-                <el-icon><Delete /></el-icon>
-                删除
-              </el-button>
+                <el-button link type="danger" @click="handleDelete(row)">
+                  <el-icon><Delete /></el-icon>
+                  删除
+                </el-button>
+              </div>
+              <div class="action-row">
+                <el-button 
+                  v-if="scanningIds.has(row.id)" 
+                  link 
+                  type="danger" 
+                  @click="handleStopScan(row)"
+                >
+                  <el-icon><VideoPause /></el-icon>
+                  停止
+                </el-button>
+                <el-button 
+                  v-else 
+                  link 
+                  type="primary" 
+                  @click="handleScan(row)"
+                >
+                  <el-icon><VideoPlay /></el-icon>
+                  扫描
+                </el-button>
+                <el-button link type="primary" @click="handleViewDetail(row)">
+                  <el-icon><View /></el-icon>
+                  详情
+                </el-button>
               </div>
             </div>
           </template>
@@ -146,12 +136,140 @@
       </div>
     </el-card>
 
+    <!-- 扫描详情抽屉 -->
+    <el-drawer
+      v-model="detailDrawerVisible"
+      title="扫描详情"
+      direction="rtl"
+      size="72%"
+      class="scan-detail-drawer"
+    >
+      <template #header>
+        <div class="drawer-header-inner">
+          <div class="drawer-header-left">
+            <el-icon class="drawer-header-icon"><View /></el-icon>
+            <div>
+              <span class="drawer-title">扫描详情</span>
+              <span class="drawer-subtitle" v-if="detailRow">{{ detailRow.project_name }} / {{ detailRow.branch }}</span>
+            </div>
+          </div>
+          <a
+            v-if="detailRow && detailRow.sonar_host"
+            href="javascript:void(0)"
+            class="drawer-sonar-link"
+            @click.prevent="openSonarPage(detailRow)"
+          >
+            <el-icon><Link /></el-icon>
+            <span>打开 Sonar</span>
+          </a>
+          <span v-else-if="detailRow" class="drawer-sonar-disabled">未配置 Sonar</span>
+        </div>
+      </template>
+      <div v-if="detailRow" class="detail-content">
+        <!-- 基本信息卡片 -->
+        <el-card class="detail-card detail-card-info" shadow="never">
+          <template #header>
+            <span class="card-header-text">基本信息</span>
+          </template>
+          <el-descriptions :column="1" border size="default" class="detail-descriptions">
+            <el-descriptions-item label="工程">{{ detailRow.project_name }}</el-descriptions-item>
+            <el-descriptions-item label="分支">{{ detailRow.branch }}</el-descriptions-item>
+            <el-descriptions-item label="Sonar Host">
+              <span class="text-ellipsis">{{ detailRow.sonar_host || '-' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="扫描结果">
+              <el-tag v-if="detailRow.result === 'passed'" type="success" size="default" effect="light" round>通过</el-tag>
+              <el-tag v-else-if="detailRow.result === 'failed'" type="danger" size="default" effect="light" round>不通过</el-tag>
+              <el-tag v-else type="info" size="default" effect="light" round>未扫描</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="扫描时间">
+              <span class="time-text">{{ detailRow.scan_time ? formatScanTime(detailRow.scan_time) : '-' }}</span>
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+
+        <!-- 不通过信息卡片 -->
+        <el-card
+          v-if="detailRow.result === 'failed' && (detailRow.error_message || detailConditions.length)"
+          class="detail-card detail-card-error"
+          shadow="never"
+        >
+          <template #header>
+            <span class="card-header-text">不通过信息</span>
+          </template>
+          <div v-if="detailRow.error_message" class="error-block">
+            <div class="error-label">错误信息</div>
+            <pre class="error-message">{{ detailRow.error_message }}</pre>
+          </div>
+          <div v-if="detailConditions.length" class="conditions-block">
+            <div class="conditions-label">未通过条件</div>
+            <ul class="conditions-list">
+              <li v-for="(c, i) in detailConditions" :key="i">
+                {{ c.metric_name }}: {{ c.actual_value }}（要求 {{ c.comparator }}{{ c.error_threshold }}）
+              </li>
+            </ul>
+          </div>
+        </el-card>
+
+        <!-- 历史记录卡片（分页） -->
+        <el-card class="detail-card detail-card-history" shadow="never">
+          <template #header>
+            <div class="history-card-header">
+              <span class="card-header-text">历史记录</span>
+              <span class="history-total" v-if="!historyLoading && detailHistories.length > 0">共 {{ detailHistories.length }} 条</span>
+            </div>
+          </template>
+          <div v-if="historyLoading" class="history-loading">
+            <el-skeleton :rows="4" animated />
+          </div>
+          <div v-else-if="detailHistories.length === 0" class="history-empty">
+            <el-empty description="暂无历史记录" :image-size="80" />
+          </div>
+          <template v-else>
+            <el-timeline class="history-timeline">
+              <el-timeline-item
+                v-for="h in paginatedHistories"
+                :key="h.id"
+                :type="h.status === 'completed' ? 'success' : (h.status === 'failed' ? 'danger' : 'info')"
+              >
+                <div class="history-item">
+                  <div class="history-item-top">
+                    <el-tag
+                      :type="h.status === 'completed' ? 'success' : (h.status === 'failed' ? 'danger' : 'info')"
+                      size="small"
+                      effect="light"
+                    >
+                      {{ h.status === 'completed' ? '通过' : (h.status === 'failed' ? '不通过' : '待处理') }}
+                    </el-tag>
+                    <span class="history-time">{{ h.created_at ? formatScanTime(h.created_at) : '-' }}</span>
+                  </div>
+                  <div v-if="h.error_message" class="history-error">
+                    {{ truncateText(h.error_message, 120) }}
+                  </div>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <div class="history-pagination">
+              <el-pagination
+                v-model:current-page="historyPage"
+                :page-size="historyPageSize"
+                :total="detailHistories.length"
+                layout="prev, pager, next, total"
+                small
+              />
+            </div>
+          </template>
+        </el-card>
+
+      </div>
+    </el-drawer>
+
     <!-- 新建/编辑扫描任务对话框 -->
     <el-dialog v-model="dialogVisible" width="700px" :close-on-click-modal="true">
       <template #header>
         <div class="dialog-header">
           <span class="dialog-title">{{ dialogTitle }}</span>
-          <span class="dialog-description">{{ dialogTitle === '新建任务' ? '创建新的代码扫描任务，配置扫描参数和SonarQube连接信息' : '修改代码扫描任务的配置信息' }}</span>
+          <span class="dialog-description">{{ dialogTitle === '新建任务' ? '创建新的代码扫描任务配置，用于跳转到SonarQube查看扫描结果' : '修改代码扫描任务的配置信息' }}</span>
         </div>
       </template>
       <el-form :model="formData" label-width="120px">
@@ -173,8 +291,8 @@
         <el-form-item label="分支" required>
           <el-input v-model="formData.branch" placeholder="例如：main、develop" />
         </el-form-item>
-        <el-form-item label="扫描路径" required>
-          <el-input v-model="formData.scan_path" placeholder="例如：/path/to/code" />
+        <el-form-item label="扫描路径">
+          <el-input v-model="formData.scan_path" placeholder="例如：/path/to/code（可选）" />
         </el-form-item>
         <el-form-item label="编程语言">
           <el-select v-model="formData.language" placeholder="请选择编程语言" clearable style="width: 100%">
@@ -187,9 +305,9 @@
           </el-select>
         </el-form-item>
         <el-form-item label="Sonar Project" class="form-item-no-wrap">
-          <el-input v-model="formData.sonar_project_key" placeholder="例如：Mysterious" />
+          <el-input v-model="formData.sonar_project_key" placeholder="Sonar中的项目Key，例如：my-project" />
         </el-form-item>
-        <el-form-item label="Sonar Host">
+        <el-form-item label="Sonar Host" required>
           <el-select 
             v-model="formData.sonar_host" 
             placeholder="从环境列表选择或手动输入" 
@@ -207,7 +325,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="Sonar Login">
-          <el-input v-model="formData.sonar_login" type="password" show-password placeholder="Sonar登录Token" />
+          <el-input v-model="formData.sonar_login" type="password" show-password placeholder="Sonar登录Token（可选）" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -217,268 +335,28 @@
         </div>
       </template>
     </el-dialog>
-
-    <!-- 详情抽屉 -->
-    <el-drawer
-      v-model="detailDrawerVisible"
-      title="扫描结果详情"
-      :size="'80%'"
-      :close-on-click-modal="true"
-    >
-      <div v-if="detailLoading" class="loading-container">
-        <el-skeleton :rows="10" animated />
-      </div>
-      <div v-else-if="detailResult && currentDetailScan" class="result-detail-content">
-        <!-- 顶部操作栏 -->
-        <div class="detail-header-actions">
-          <el-button 
-            v-if="detailSonarUrl"
-            type="primary" 
-            @click="openDetailSonarPage"
-          >
-            <el-icon><Link /></el-icon>
-            查看Sonar详情
-          </el-button>
-        </div>
-
-        <!-- 扫描基本信息 -->
-        <el-descriptions :column="2" border class="info-section">
-          <el-descriptions-item label="项目">{{ currentDetailScan.project?.name || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="工程">{{ currentDetailScan.project_name || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="分支">{{ currentDetailScan.branch || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="扫描路径">{{ currentDetailScan.scan_path || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="扫描时间">{{ formatDate(currentDetailScan.scan_time) }}</el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag :type="getDetailStatusType(detailResult.status)">
-              {{ getDetailStatusText(detailResult.status) }}
-            </el-tag>
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <!-- 扫描指标 - SonarQube Overview 风格 -->
-        <div v-if="detailResult.metrics" class="metrics-section">
-          <h3>扫描指标</h3>
-          
-          <div class="metrics-overview-container">
-            <!-- 左列：总体项目指标 -->
-            <div class="metrics-column">
-              <!-- Bugs & Vulnerabilities -->
-              <div class="overview-row">
-                <div class="overview-row-header">
-                  <span class="overview-title">Bugs & Vulnerabilities</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">🐛</span>
-                      Bugs
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailMetricClass(detailResult.metrics.bugs, 'bugs')">
-                      {{ detailResult.metrics.bugs || 0 }}
-                    </div>
-                  </div>
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">🔒</span>
-                      Vulnerabilities
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailMetricClass(detailResult.metrics.vulnerabilities, 'vulnerabilities')">
-                      {{ detailResult.metrics.vulnerabilities || 0 }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Code Smells -->
-              <div class="overview-row">
-                <div class="overview-row-header">
-                  <span class="overview-title">Code Smells</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">💀</span>
-                      Code Smells
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailMetricClass(detailResult.metrics.code_smells, 'code_smells')">
-                      {{ detailResult.metrics.code_smells || 0 }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Coverage -->
-              <div class="overview-row">
-                <div class="overview-row-header">
-                  <span class="overview-title">Coverage</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">📊</span>
-                      Coverage
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailCoverageClass(detailResult.metrics.coverage)">
-                      {{ detailResult.metrics.coverage ? `${detailResult.metrics.coverage}%` : '0.0%' }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Duplications -->
-              <div class="overview-row">
-                <div class="overview-row-header">
-                  <span class="overview-title">Duplications</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">📋</span>
-                      Duplications
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailDuplicationClass(detailResult.metrics.duplicated_lines_density)">
-                      {{ detailResult.metrics.duplicated_lines_density ? `${detailResult.metrics.duplicated_lines_density}%` : '0.0%' }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 右列：新代码指标 -->
-            <div class="metrics-column metrics-column-new">
-              <!-- New Bugs & New Vulnerabilities -->
-              <div class="overview-row overview-row-new">
-                <div class="overview-row-header overview-row-header-new">
-                  <span class="overview-title">Bugs & Vulnerabilities</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">🐛</span>
-                      New Bugs
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailMetricClass(detailResult.metrics.new_bugs, 'new_bugs')">
-                      {{ detailResult.metrics.new_bugs ?? '-' }}
-                    </div>
-                  </div>
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">🔒</span>
-                      New Vulnerabilities
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailMetricClass(detailResult.metrics.new_vulnerabilities, 'new_vulnerabilities')">
-                      {{ detailResult.metrics.new_vulnerabilities ?? '-' }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- New Code Smells -->
-              <div class="overview-row overview-row-new">
-                <div class="overview-row-header overview-row-header-new">
-                  <span class="overview-title">Code Smells</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">💀</span>
-                      New Debt
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailMetricClass(detailResult.metrics.new_technical_debt ? 1 : 0, 'new_debt')">
-                      {{ detailResult.metrics.new_technical_debt ? formatTechnicalDebt(detailResult.metrics.new_technical_debt) : '0' }}
-                    </div>
-                  </div>
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">💀</span>
-                      New Code Smells
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailMetricClass(detailResult.metrics.new_code_smells, 'new_code_smells')">
-                      {{ detailResult.metrics.new_code_smells ?? '-' }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Coverage on New Code -->
-              <div class="overview-row overview-row-new">
-                <div class="overview-row-header overview-row-header-new">
-                  <span class="overview-title">Coverage</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">📊</span>
-                      Coverage on New Code
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailCoverageClass(detailResult.metrics.new_coverage)">
-                      {{ detailResult.metrics.new_coverage !== undefined && detailResult.metrics.new_coverage !== null ? `${detailResult.metrics.new_coverage}%` : '—' }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Duplications on New Code -->
-              <div class="overview-row overview-row-new">
-                <div class="overview-row-header overview-row-header-new">
-                  <span class="overview-title">Duplications</span>
-                </div>
-                <div class="overview-row-content">
-                  <div class="overview-metric">
-                    <div class="overview-metric-label">
-                      <span class="overview-icon">📋</span>
-                      Duplications on New Code
-                    </div>
-                    <div class="overview-metric-value" :class="getDetailDuplicationClass(detailResult.metrics.new_duplicated_lines_density)">
-                      {{ detailResult.metrics.new_duplicated_lines_density !== undefined && detailResult.metrics.new_duplicated_lines_density !== null ? `${detailResult.metrics.new_duplicated_lines_density}%` : '—' }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 扫描详细过程 -->
-        <div v-if="detailResult.scan_output" class="scan-output-section">
-          <h3>扫描详细过程</h3>
-          <pre class="scan-output-content">{{ detailResult.scan_output }}</pre>
-        </div>
-
-        <!-- 错误信息 -->
-        <div v-if="detailResult.error_message" class="error-section">
-          <h3>错误信息</h3>
-          <el-alert type="error" :closable="false">
-            <pre class="error-message-content">{{ detailResult.error_message }}</pre>
-          </el-alert>
-        </div>
-      </div>
-      <div v-else class="no-result">
-        <el-empty description="暂无数据" />
-      </div>
-    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, EditPen, Delete, DocumentCopy, VideoPlay, View, Link } from '@element-plus/icons-vue'
+import { Plus, Search, EditPen, Delete, DocumentCopy, Link, VideoPlay, VideoPause, View } from '@element-plus/icons-vue'
 import * as codeScanApi from '../api/codescan'
+import type { ScanExecuteResult, CodeScanResultHistory } from '../api/codescan'
 import * as projectApi from '../api/projects'
 import * as apitestApi from '../api/apitest'
 import { useProjectContext } from '../composables/useProjectContext'
-import type { CodeScan, Project, ApiEnvironment, CodeScanResult } from '../api/types'
+import type { CodeScan, Project, ApiEnvironment } from '../api/types'
 
 
 const scans = ref<CodeScan[]>([])
-const scanResults = ref<Record<number, CodeScanResult>>({}) // 存储每个扫描的结果
 const projects = ref<Project[]>([])
 const environments = ref<ApiEnvironment[]>([])
+const scanningIds = ref<Set<number>>(new Set()) // 正在扫描中的任务ID
 const filters = reactive({
   project_id: undefined as number | undefined,
-  keyword: '',
-  result: undefined as string | undefined
+  keyword: ''
 })
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -487,7 +365,52 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('新增任务')
 const editingId = ref<number>()
 
+// 详情抽屉
+const detailDrawerVisible = ref(false)
+const detailRow = ref<CodeScan | null>(null)
+// 最近一次执行结果（含 conditions），用于详情抽屉展示
+const lastExecuteResultMap = ref<Record<number, ScanExecuteResult>>({})
+// 历史记录
+const detailHistories = ref<CodeScanResultHistory[]>([])
+const historyLoading = ref(false)
+const historyPage = ref(1)
+const historyPageSize = 5
+
 // 编程语言选项
+// 截断文本
+const truncateText = (text: string, maxLength: number): string => {
+  if (!text) return ''
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
+}
+
+// 格式化扫描时间
+const formatScanTime = (t: string): string => {
+  if (!t) return '-'
+  try {
+    const d = new Date(t)
+    return isNaN(d.getTime()) ? t : d.toLocaleString('zh-CN')
+  } catch {
+    return t
+  }
+}
+
+// 详情抽屉中展示的不通过条件（优先用最近一次执行返回的 conditions）
+const detailConditions = computed(() => {
+  const row = detailRow.value
+  if (!row) return []
+  const last = lastExecuteResultMap.value[row.id]
+  if (last?.conditions?.length) return last.conditions
+  return []
+})
+
+// 历史记录分页（每页 10 条）
+const paginatedHistories = computed(() => {
+  const list = detailHistories.value
+  const start = (historyPage.value - 1) * historyPageSize
+  return list.slice(start, start + historyPageSize)
+})
+
 const languageOptions = [
   { label: 'Java', value: 'Java' },
   { label: 'Python', value: 'Python' },
@@ -516,8 +439,7 @@ const loadScans = async () => {
   loading.value = true
   try {
     const params: any = {
-      keyword: filters.keyword || undefined,
-      result: filters.result
+      keyword: filters.keyword || undefined
     }
     
     // 优先使用当前项目过滤
@@ -528,18 +450,6 @@ const loadScans = async () => {
     }
     
     scans.value = await codeScanApi.getCodeScans(params)
-    // 加载每个扫描的最新结果
-    await Promise.all(
-      scans.value.map(async (scan) => {
-        try {
-          const result = await codeScanApi.getCodeScanResult(scan.id)
-          scanResults.value[scan.id] = result
-        } catch (error) {
-          // 如果还没有结果，忽略错误
-          console.debug(`扫描 ${scan.id} 还没有结果`)
-        }
-      })
-    )
   } catch (error: any) {
     ElMessage.error(error.message || '加载扫描任务列表失败')
   } finally {
@@ -585,7 +495,6 @@ const loadEnvironments = async (projectId?: number) => {
 const handleReset = () => {
   filters.project_id = undefined
   filters.keyword = ''
-  filters.result = undefined
   loadScans()
 }
 
@@ -622,7 +531,7 @@ const handleEdit = async (row: CodeScan) => {
     project_id: row.project_id,
     project_name: row.project_name,
     branch: row.branch,
-    scan_path: row.scan_path,
+    scan_path: row.scan_path || '',
     language: row.language || '',
     sonar_project_key: row.sonar_project_key || '',
     sonar_host: row.sonar_host || '',
@@ -632,7 +541,7 @@ const handleEdit = async (row: CodeScan) => {
 }
 
 const handleSave = async () => {
-  if (!formData.project_id || !formData.project_name || !formData.branch || !formData.scan_path) {
+  if (!formData.project_id || !formData.project_name || !formData.branch) {
     ElMessage.warning('请填写必填项')
     return
   }
@@ -669,249 +578,77 @@ const handleDelete = async (row: CodeScan) => {
   }
 }
 
+// 执行扫描
 const handleScan = async (row: CodeScan) => {
+  if (!row.sonar_host) {
+    ElMessage.warning('请先配置 Sonar Host')
+    return
+  }
+  
+  scanningIds.value.add(row.id)
+  ElMessage.info('正在查询 SonarQube 扫描状态...')
+  
   try {
-    row.scanning = true
-    await codeScanApi.executeCodeScan(row.id)
-    ElMessage.success('扫描任务已启动')
-    // 重置结果为扫描中状态
-    scanResults.value[row.id] = {
-      id: 0,
-      scan_id: row.id,
-      status: 'running'
-    } as CodeScanResult
-    // 定时刷新列表以获取最新状态
-    const refreshInterval = setInterval(async () => {
-      try {
-        const result = await codeScanApi.getCodeScanResult(row.id)
-        scanResults.value[row.id] = result
-        // 如果扫描完成，停止刷新
-        if (result.status === 'completed' || result.status === 'failed') {
-          clearInterval(refreshInterval)
-          // 更新row的result字段
-          const scan = scans.value.find(s => s.id === row.id)
-          if (scan) {
-            if (result.status === 'completed') {
-              // 检查bugs，有bug就是failed
-              const bugs = result.metrics?.bugs || 0
-              scan.result = bugs > 0 ? 'failed' : 'passed'
-            } else {
-              scan.result = 'failed'
-            }
-          }
-          loadScans() // 重新加载完整列表
-        }
-      } catch (error) {
-        // 忽略错误
-      }
-    }, 3000) // 每3秒刷新一次
-    
-    // 10分钟后停止刷新
-    setTimeout(() => {
-      clearInterval(refreshInterval)
-    }, 600000)
+    const result = await codeScanApi.executeCodeScan(row.id)
+    lastExecuteResultMap.value[row.id] = result
+
+    if (result.result === 'passed') {
+      ElMessage.success('扫描通过')
+    } else if (result.result === 'failed') {
+      const tip = result.error_message ? truncateText(result.error_message, 80) : '质量门未通过，请点「详情」或到 Sonar 控制台查看'
+      ElMessage.warning('扫描不通过：' + tip)
+    }
+
+    // 刷新列表
+    await loadScans()
   } catch (error: any) {
-    ElMessage.error(error.message || '启动扫描失败')
+    ElMessage.error(error.message || '查询扫描状态失败')
+    await loadScans()
   } finally {
-    row.scanning = false
+    scanningIds.value.delete(row.id)
   }
 }
 
-const detailDrawerVisible = ref(false)
-const currentDetailScan = ref<CodeScan | null>(null)
-const detailResult = ref<CodeScanResult | null>(null)
-const detailLoading = ref(false)
+// 停止扫描
+const handleStopScan = (row: CodeScan) => {
+  scanningIds.value.delete(row.id)
+  ElMessage.info('已取消查询')
+}
 
-const handleViewDetail = async (row: CodeScan) => {
-  currentDetailScan.value = row
+// 加载扫描历史记录
+const loadScanHistory = async (scanId: number) => {
+  historyLoading.value = true
+  try {
+    detailHistories.value = await codeScanApi.getCodeScanResults(scanId)
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载扫描历史失败')
+    detailHistories.value = []
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+// 查看详情（打开抽屉，可再点击转到 Sonar 页面）
+const handleViewDetail = (row: CodeScan) => {
+  detailRow.value = row
+  historyPage.value = 1
   detailDrawerVisible.value = true
-  await loadDetailResult(row.id)
-}
-
-const loadDetailResult = async (scanId: number) => {
-  detailLoading.value = true
-  try {
-    detailResult.value = await codeScanApi.getCodeScanResult(scanId)
-  } catch (error: any) {
-    ElMessage.error(error.message || '加载扫描结果失败')
-  } finally {
-    detailLoading.value = false
+  if (row.id) {
+    loadScanHistory(row.id)
   }
 }
 
-// 计算Sonar页面URL（详情抽屉中使用）
-const detailSonarUrl = computed(() => {
-  if (!currentDetailScan.value) {
-    return null
-  }
-  const host = currentDetailScan.value.sonar_host
-  const projectKey = currentDetailScan.value.sonar_project_key || `${currentDetailScan.value.project_name}:${currentDetailScan.value.branch}`
-  
-  if (!host) {
-    return null
+// 打开Sonar页面
+const openSonarPage = (row: CodeScan) => {
+  if (!row.sonar_host) {
+    ElMessage.warning('请先配置 Sonar Host')
+    return
   }
   
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host
-  return `${baseUrl}/dashboard?id=${encodeURIComponent(projectKey)}`
-})
-
-const openDetailSonarPage = () => {
-  if (detailSonarUrl.value) {
-    window.open(detailSonarUrl.value, '_blank')
-  } else {
-    ElMessage.warning('Sonar Host 或 ProjectKey 未配置，无法打开Sonar页面')
-  }
-}
-
-// 详情页状态相关函数
-const getDetailStatusText = (status: string) => {
-  switch (status) {
-    case 'running':
-      return '扫描中'
-    case 'completed':
-      return '已完成'
-    case 'failed':
-      return '失败'
-    default:
-      return '-'
-  }
-}
-
-const getDetailStatusType = (status: string) => {
-  switch (status) {
-    case 'running':
-      return 'warning'
-    case 'completed':
-      return 'success'
-    case 'failed':
-      return 'danger'
-    default:
-      return 'info'
-  }
-}
-
-// 详情页指标样式函数
-const getDetailMetricClass = (value: number | undefined, type: string) => {
-  const numValue = value || 0
-  if (numValue === 0) {
-    return 'metric-good'
-  } else if (numValue <= 5) {
-    return 'metric-warning'
-  } else {
-    return 'metric-danger'
-  }
-}
-
-const getDetailCoverageClass = (coverage: number | undefined) => {
-  const numValue = coverage || 0
-  if (numValue >= 80) {
-    return 'metric-good'
-  } else if (numValue >= 50) {
-    return 'metric-warning'
-  } else {
-    return 'metric-danger'
-  }
-}
-
-const getDetailDuplicationClass = (duplication: number | undefined) => {
-  const numValue = duplication || 0
-  if (numValue <= 3) {
-    return 'metric-good'
-  } else if (numValue <= 5) {
-    return 'metric-warning'
-  } else {
-    return 'metric-danger'
-  }
-}
-
-// 格式化技术债务（分钟转为天、小时等）
-const formatTechnicalDebt = (minutes: number | undefined) => {
-  if (!minutes || minutes === 0) {
-    return '0'
-  }
-  const days = Math.floor(minutes / (8 * 60))
-  const hours = Math.floor((minutes % (8 * 60)) / 60)
-  const mins = minutes % 60
-  
-  if (days > 0) {
-    return `${days}d ${hours}h`
-  } else if (hours > 0) {
-    return `${hours}h ${mins}m`
-  } else {
-    return `${mins}m`
-  }
-}
-
-const formatDate = (dateStr: string) => {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN')
-}
-
-// 获取扫描状态
-const getScanStatus = (row: CodeScan): 'scanning' | 'passed' | 'failed' | 'unknown' => {
-  const result = scanResults.value[row.id]
-  if (result) {
-    if (result.status === 'running') {
-      return 'scanning'
-    } else if (result.status === 'completed') {
-      // 检查是否有bug，有bug就返回failed
-      const bugs = result.metrics?.bugs || 0
-      if (bugs > 0) {
-        return 'failed'
-      }
-      return 'passed'
-    } else if (result.status === 'failed') {
-      return 'failed'
-    }
-  }
-  // 如果没有结果，根据 row.result 判断
-  if (row.result === 'passed') {
-    // 如果有结果数据，再检查一次bugs
-    const result = scanResults.value[row.id]
-    if (result?.metrics) {
-      const bugs = result.metrics.bugs || 0
-      if (bugs > 0) {
-        return 'failed'
-      }
-    }
-    return 'passed'
-  } else if (row.result === 'failed') {
-    return 'failed'
-  }
-  return 'unknown'
-}
-
-// 获取扫描错误信息
-const getScanErrorMessage = (row: CodeScan): string | undefined => {
-  const result = scanResults.value[row.id]
-  return result?.error_message
-}
-
-// 获取结果文本
-const getResultText = (row: CodeScan): string => {
-  const status = getScanStatus(row)
-  if (status === 'scanning') {
-    return '扫描中'
-  } else if (status === 'passed') {
-    return '通过'
-  } else if (status === 'failed') {
-    return '不通过'
-  }
-  return '-'
-}
-
-// 获取标签类型
-const getResultTagType = (row: CodeScan): 'success' | 'danger' | 'warning' | 'info' => {
-  const status = getScanStatus(row)
-  if (status === 'scanning') {
-    return 'warning'
-  } else if (status === 'passed') {
-    return 'success'
-  } else if (status === 'failed') {
-    return 'danger'
-  }
-  return 'info'
+  const host = row.sonar_host.endsWith('/') ? row.sonar_host.slice(0, -1) : row.sonar_host
+  const projectKey = row.sonar_project_key || `${row.project_name}:${row.branch}`
+  const url = `${host}/dashboard?id=${encodeURIComponent(projectKey)}`
+  window.open(url, '_blank')
 }
 
 const paginatedScans = computed(() => {
@@ -1019,191 +756,6 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-/* 详情抽屉样式 */
-.result-detail-content {
-  padding: 20px;
-}
-
-.detail-header-actions {
-  margin-bottom: 24px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.info-section {
-  margin-bottom: 24px;
-}
-
-.metrics-section {
-  margin: 24px 0;
-}
-
-.metrics-section h3 {
-  margin-bottom: 16px;
-  font-size: 18px;
-  font-weight: 600;
-  color: #495057;
-}
-
-/* 指标容器：左右两列布局 */
-.metrics-overview-container {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-}
-
-/* 确保左右两列对齐 */
-.metrics-column,
-.metrics-column-new {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.metrics-column {
-  flex: 1;
-  min-width: 0;
-}
-
-.metrics-column-new {
-  /* 移除黄色背景 */
-}
-
-.overview-row-new {
-  background: #ffffff;
-  border: 1px solid #e0e0e0;
-}
-
-.overview-row-header-new {
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-bottom: 1px solid #e0e0e0;
-}
-
-/* SonarQube Overview 风格 */
-.overview-row {
-  background: #ffffff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  overflow: hidden;
-  transition: all 0.3s ease;
-}
-
-.overview-row:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.overview-row-header {
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  padding: 12px 16px;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.overview-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #495057;
-}
-
-.overview-row-content {
-  display: flex;
-  padding: 20px;
-  gap: 40px;
-  flex-wrap: wrap;
-}
-
-.overview-metric {
-  display: flex;
-  flex-direction: column;
-  min-width: 150px;
-}
-
-.overview-metric-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: #6c757d;
-  margin-bottom: 8px;
-}
-
-.overview-icon {
-  font-size: 18px;
-}
-
-.overview-metric-value {
-  font-size: 32px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.metric-good {
-  color: #52c41a; /* 绿色 */
-}
-
-.metric-warning {
-  color: #faad14; /* 黄色 */
-}
-
-.metric-danger {
-  color: #f5222d; /* 红色 */
-}
-
-.scan-output-section {
-  margin-top: 24px;
-}
-
-.scan-output-section h3 {
-  margin-bottom: 16px;
-  font-size: 18px;
-  font-weight: 600;
-  color: #495057;
-}
-
-.scan-output-content {
-  background: #f5f5f5;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 16px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #333;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-height: 600px;
-  overflow-y: auto;
-}
-
-.error-section {
-  margin-top: 24px;
-}
-
-.error-section h3 {
-  margin-bottom: 16px;
-  font-size: 18px;
-  font-weight: 600;
-  color: #495057;
-}
-
-.error-message-content {
-  margin: 0;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-.no-result {
-  padding: 40px;
-  text-align: center;
-}
-
-.loading-container {
-  padding: 20px;
-}
-
 .table-actions {
   display: flex;
   flex-direction: column;
@@ -1252,23 +804,6 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 
-.scan-detail-popover {
-  padding: 8px 0;
-}
-
-.detail-title {
-  font-weight: 600;
-  margin-bottom: 12px;
-  color: #303133;
-  font-size: 14px;
-}
-
-.detail-content {
-  font-size: 13px;
-  line-height: 1.6;
-  color: #606266;
-}
-
 /* 对话框标题和说明样式 */
 .dialog-header {
   display: flex;
@@ -1287,5 +822,251 @@ onMounted(async () => {
   color: #909399;
   line-height: 1.5;
 }
-</style>
 
+/* 扫描详情抽屉 */
+.scan-detail-drawer :deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.scan-detail-drawer :deep(.el-drawer__body) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scan-detail-drawer :deep(.el-drawer__body)::-webkit-scrollbar {
+  display: none;
+}
+
+.scan-detail-drawer .drawer-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding-right: 8px;
+}
+
+.scan-detail-drawer .drawer-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.scan-detail-drawer .drawer-header-icon {
+  font-size: 24px;
+  color: #667eea;
+  flex-shrink: 0;
+}
+
+.scan-detail-drawer .drawer-sonar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #667eea;
+  text-decoration: none;
+  border-radius: 8px;
+  transition: background 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+
+.scan-detail-drawer .drawer-sonar-link:hover {
+  background: rgba(102, 126, 234, 0.08);
+  color: #5a6fd6;
+}
+
+.scan-detail-drawer .drawer-sonar-link .el-icon {
+  font-size: 16px;
+}
+
+.scan-detail-drawer .drawer-sonar-disabled {
+  font-size: 13px;
+  color: #c0c4cc;
+  flex-shrink: 0;
+}
+
+.scan-detail-drawer .drawer-title {
+  display: block;
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.scan-detail-drawer .drawer-subtitle {
+  display: block;
+  font-size: 13px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.detail-content {
+  padding: 0 4px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.detail-content::-webkit-scrollbar {
+  display: none;
+}
+
+.detail-card {
+  border-radius: 12px;
+  border: 1px solid #ebeef5;
+}
+
+.detail-card :deep(.el-card__header) {
+  padding: 14px 20px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #f8f9fc 0%, #f0f2f8 100%);
+  border-bottom: 1px solid #ebeef5;
+}
+
+.detail-card :deep(.el-card__body) {
+  padding: 20px;
+}
+
+.card-header-text {
+  font-size: 15px;
+  color: #303133;
+}
+
+.detail-descriptions {
+  margin: 0;
+}
+
+.detail-descriptions :deep(.el-descriptions__label) {
+  width: 100px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.detail-content .text-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.time-text {
+  font-size: 14px;
+  color: #606266;
+}
+
+.error-block,
+.conditions-block {
+  margin-bottom: 16px;
+}
+
+.error-block:last-child,
+.conditions-block:last-child {
+  margin-bottom: 0;
+}
+
+.error-label,
+.conditions-label {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.error-message {
+  margin: 0;
+  padding: 12px;
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #c45656;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.conditions-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.8;
+}
+
+.history-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-total {
+  font-size: 13px;
+  font-weight: 400;
+  color: #909399;
+}
+
+.history-loading {
+  padding: 8px 0;
+}
+
+.history-empty {
+  padding: 24px 0;
+}
+
+.history-timeline {
+  margin: 0 0 16px;
+  padding-left: 8px;
+}
+
+.history-timeline :deep(.el-timeline-item__timestamp) {
+  display: none;
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-time {
+  font-size: 13px;
+  color: #909399;
+}
+
+.history-error {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.5;
+  padding-left: 0;
+}
+
+.history-pagination {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+  border-top: 1px solid #f0f2f5;
+}
+</style>

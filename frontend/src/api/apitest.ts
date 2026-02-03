@@ -258,8 +258,22 @@ export interface TestTaskUpdate {
   environment_id?: number
 }
 
+export interface HeaderReplacement {
+  key: string
+  value: string
+}
+
+export interface AssertionReplacement {
+  type: 'status_code' | 'json_path' | 'response_time' | 'contains'
+  target?: string
+  operator: 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'not_contains'
+  expected: any
+}
+
 export interface TestTaskExecutionRequest {
   environment_id: number
+  header_replacements?: HeaderReplacement[]
+  assertion_replacements?: AssertionReplacement[]
 }
 
 export interface TestTaskExecutionResult {
@@ -335,4 +349,102 @@ export const getTestTaskExecutions = (taskId: number) => {
 // 获取执行记录详情
 export const getTestTaskExecution = (taskId: number, executionId: number) => {
   return request.get<TestTaskExecution>(`/test-tasks/${taskId}/executions/${executionId}`)
+}
+
+// ==================== 测试文件管理 ====================
+
+export interface TestFile {
+  id: number
+  name: string
+  description?: string
+  file_type: 'flow' | 'local'
+  file_name: string
+  file_path?: string
+  file_size?: number
+  mime_type?: string
+  flow_id?: number
+  created_by?: number
+  created_at: string
+  updated_at: string
+  creator?: {
+    id: number
+    username: string
+    nickname?: string
+  }
+}
+
+export interface TestFileList {
+  items: TestFile[]
+  total: number
+}
+
+export interface TestFileCreate {
+  name: string
+  description?: string
+  file_type: 'flow' | 'local'
+  file?: File
+  file_content?: any
+  flow_id?: number
+}
+
+export interface TestFileUpdate {
+  name?: string
+  description?: string
+}
+
+// 获取测试文件列表
+export const getTestFiles = (params?: { keyword?: string; file_type?: string; page?: number; page_size?: number }) => {
+  return request.get<TestFileList>('/test-files', { params })
+}
+
+// 获取单个测试文件
+export const getTestFile = (id: number) => {
+  return request.get<TestFile>(`/test-files/${id}`)
+}
+
+// 创建测试文件（上传或保存流程）
+export const createTestFile = (data: TestFileCreate) => {
+  const formData = new FormData()
+  formData.append('name', data.name)
+  if (data.description) {
+    formData.append('description', data.description)
+  }
+  formData.append('file_type', data.file_type)
+  
+  if (data.file_type === 'local' && data.file) {
+    formData.append('file', data.file)
+  } else if (data.file_type === 'flow' && data.file_content) {
+    formData.append('file_content', JSON.stringify(data.file_content))
+    if (data.flow_id) {
+      formData.append('flow_id', String(data.flow_id))
+    }
+  }
+  
+  return request.post<TestFile>('/test-files', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}
+
+// 更新测试文件
+export const updateTestFile = (id: number, data: TestFileUpdate) => {
+  return request.put<TestFile>(`/test-files/${id}`, data)
+}
+
+// 删除测试文件
+export const deleteTestFile = (id: number) => {
+  return request.delete(`/test-files/${id}`)
+}
+
+// 下载测试文件
+export const downloadTestFile = (id: number) => {
+  return request.get(`/test-files/${id}/download`, {
+    responseType: 'blob'
+  })
+}
+
+// 获取测试文件内容（用于导入）
+export const getTestFileContent = (id: number) => {
+  return request.get<any>(`/test-files/${id}/content`)
 }

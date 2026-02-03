@@ -11,7 +11,6 @@ Docker Compose 部署时，MySQL 容器会自动执行 `docker-entrypoint-initdb
    - 不包含初始数据插入
 
 2. **02_init_data.sql** (`docker/02_init_data.sql`)
-   - 创建 SonarQube 数据库
    - 插入初始管理员用户（admin/admin123）
 
 ### 注意事项

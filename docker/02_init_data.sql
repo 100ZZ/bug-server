@@ -9,9 +9,6 @@ SET character_set_connection=utf8mb4;
 
 USE bug_management;
 
--- 创建 SonarQube 数据库（如果不存在）
-CREATE DATABASE IF NOT EXISTS sonarqube CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 -- 初始化管理员用户
 -- 用户名：admin
 -- 密码：admin123
