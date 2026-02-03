@@ -286,14 +286,14 @@ tar xzf bug-images-backup.tar.gz -C /opt
 ```bash
 # 例如
 /opt/code/
-├── arcana-saas/          # 项目1
+├── saas/          # 项目1
 ├── my-java-project/      # 项目2
 └── ...
 ```
 
 2. 新增扫描任务时，路径填写容器内路径（与宿主机路径相同）：
 ```
-扫描路径: /opt/code/arcana-saas
+扫描路径: /opt/code/saas
 ```
 
 **自定义扫描目录：**

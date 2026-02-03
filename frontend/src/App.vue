@@ -19,7 +19,7 @@
                 <div style="max-width: 300px; line-height: 1.6;">
                   如果有任何问题，
                   <a 
-                    href="https://di-matrix.feishu.cn/docx/TsgUdaWCnojvWxxnNkMc9GsZn3f" 
+                    href="https://github.com/100ZZ/bug-server" 
                     target="_blank"
                     style="color: #409eff; text-decoration: underline;"
                   >
