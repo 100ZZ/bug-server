@@ -1,0 +1,31 @@
+FROM 100zz/test-python:3.12-slim
+
+WORKDIR /app
+
+# 安装系统依赖
+# 说明：部分环境下 Debian 基础镜像自带的 /etc/apt/apt.conf.d/docker-clean
+# 会通过 APT::Update::Post-Invoke 钩子执行 rm -f /var/cache/apt/archives/*.deb ...，
+# 在旧版 Docker 或特定存储驱动上，该钩子可能报错导致 apt-get update 退出码 100。
+# 这里先删除该清理脚本，再执行 apt-get update/install，避免构建在不同 Docker 版本上行为不一致。
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && apt-get install -y \
+        gcc \
+        default-libmysqlclient-dev \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制依赖文件
+COPY backend/requirements.txt .
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制应用代码
+COPY backend/ .
+
+# 暴露端口
+EXPOSE 43211
+
+# 启动命令（在 docker-compose 中会被覆盖）
+CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "43211"]
+
