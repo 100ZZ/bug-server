@@ -1,0 +1,155 @@
+/* 全局对话框样式 - 只修改按钮颜色，保持默认样式 */
+
+/* 对话框标题栏 - 去掉背景色 */
+.el-dialog__header {
+  background: transparent !important;
+  border-bottom: none !important;
+}
+
+/* 对话框底部 - 去掉灰色背景和横线 */
+.el-dialog__footer {
+  background: transparent !important;
+  border-top: none !important;
+}
+
+/* 对话框中的所有按钮 - 使用更具体的选择器确保覆盖 */
+.el-dialog__footer .el-button,
+.el-dialog__footer button.el-button,
+.el-dialog .el-button {
+  border-radius: 8px !important;
+  font-weight: 500 !important;
+  transition: all 0.3s ease !important;
+  margin-left: 8px !important;
+}
+
+.el-dialog__footer .el-button--primary,
+.el-dialog__footer button.el-button--primary,
+.el-dialog .el-button--primary,
+.el-dialog__footer .el-button[type="primary"],
+.el-dialog .el-button[type="primary"] {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+  color: #ffffff !important;
+  --el-button-bg-color: transparent !important;
+  --el-button-border-color: transparent !important;
+  --el-button-text-color: #ffffff !important;
+  --el-button-hover-bg-color: transparent !important;
+  --el-button-hover-border-color: transparent !important;
+  --el-button-hover-text-color: #ffffff !important;
+}
+
+.el-dialog__footer .el-button--primary:hover,
+.el-dialog__footer button.el-button--primary:hover,
+.el-dialog .el-button--primary:hover,
+.el-dialog__footer .el-button[type="primary"]:hover,
+.el-dialog .el-button[type="primary"]:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5) !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  --el-button-bg-color: transparent !important;
+  --el-button-border-color: transparent !important;
+  --el-button-text-color: #ffffff !important;
+}
+
+.el-dialog__footer .el-button--primary:focus,
+.el-dialog__footer button.el-button--primary:focus,
+.el-dialog .el-button--primary:focus {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+}
+
+.el-dialog__footer .el-button:not(.el-button--primary) {
+  border-radius: 8px !important;
+  transition: all 0.3s ease !important;
+}
+
+.el-dialog__footer .el-button:not(.el-button--primary):hover {
+  transform: translateY(-2px) !important;
+}
+
+/* ElMessageBox 确认框样式 - 统一圆角和按钮样式 */
+
+.el-message-box {
+  border-radius: 16px !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+  overflow: hidden !important;
+}
+
+.el-message-box__header {
+  background: transparent !important;
+  border-bottom: none !important;
+}
+
+.el-message-box__btns {
+  background: transparent !important;
+  border-top: none !important;
+}
+
+.el-message-box__btns .el-button,
+.el-message-box__btns button.el-button {
+  border-radius: 8px !important;
+  font-weight: 500 !important;
+  transition: all 0.3s ease !important;
+  margin-left: 8px !important;
+}
+
+.el-message-box__btns .el-button--primary,
+.el-message-box__btns button.el-button--primary,
+.el-message-box__btns .el-button[type="primary"] {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+  color: #ffffff !important;
+  --el-button-bg-color: transparent !important;
+  --el-button-border-color: transparent !important;
+  --el-button-text-color: #ffffff !important;
+  --el-button-hover-bg-color: transparent !important;
+  --el-button-hover-border-color: transparent !important;
+  --el-button-hover-text-color: #ffffff !important;
+}
+
+.el-message-box__btns .el-button--primary:hover,
+.el-message-box__btns button.el-button--primary:hover,
+.el-message-box__btns .el-button[type="primary"]:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5) !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  --el-button-bg-color: transparent !important;
+  --el-button-border-color: transparent !important;
+  --el-button-text-color: #ffffff !important;
+}
+
+.el-message-box__btns .el-button--primary:focus,
+.el-message-box__btns button.el-button--primary:focus {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+}
+
+.el-message-box__btns .el-button:not(.el-button--primary) {
+  border-radius: 8px !important;
+  transition: all 0.3s ease !important;
+}
+
+.el-message-box__btns .el-button:not(.el-button--primary):hover {
+  transform: translateY(-2px) !important;
+}
+

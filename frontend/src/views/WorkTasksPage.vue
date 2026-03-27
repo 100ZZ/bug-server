@@ -1,0 +1,1179 @@
+<template>
+  <div class="worktasks-page">
+    <el-card class="filter-card">
+      <div class="filter-header">
+        <h2>
+          <el-icon><Memo /></el-icon>
+          任务管理
+          <span v-if="hasProjectSelected && getCurrentProjectName" class="current-project-tag">
+            {{ getCurrentProjectName }}
+          </span>
+        </h2>
+      </div>
+      <div class="filter-row">
+        <el-select
+          v-if="!hasProjectSelected"
+          v-model="searchProjectId"
+          placeholder="选择项目"
+          clearable
+          @change="handleSearch"
+          style="width: 180px"
+        >
+          <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+        </el-select>
+        <el-select v-model="searchSprintId" placeholder="选择迭代" clearable @change="handleSearch" style="width: 180px">
+          <el-option v-for="s in sprints" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
+        <el-select v-model="searchStatus" placeholder="状态" clearable @change="handleSearch" style="width: 130px">
+          <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
+        </el-select>
+        <el-select v-model="searchPriority" placeholder="优先级" clearable @change="handleSearch" style="width: 120px">
+          <el-option v-for="p in priorityOptions" :key="p.value" :label="p.label" :value="p.value" />
+        </el-select>
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索任务标题"
+          clearable
+          @keyup.enter="handleSearch"
+          style="width: 220px"
+        >
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-button @click="handleSearch">搜索</el-button>
+        <el-button @click="handleReset">重置</el-button>
+        <el-button type="primary" style="margin-left: auto" @click="handleCreate">
+          <el-icon><Plus /></el-icon>
+          新建任务
+        </el-button>
+      </div>
+    </el-card>
+
+    <el-card class="table-card">
+      <el-table
+        :data="items"
+        v-loading="loading"
+        class="wt-tree-table"
+        style="width: 100%"
+        stripe
+        ref="tableRef"
+        row-key="id"
+        :indent="22"
+        :tree-props="{ children: 'children' }"
+      >
+        <!-- 编号列放第一位，隐藏展开箭头 -->
+        <el-table-column label="编号" width="80" align="center" class-name="wt-id-col hide-expand">
+          <template #default="{ row }">{{ row.id }}</template>
+        </el-table-column>
+        <!-- 标题列，手动添加展开箭头 -->
+        <el-table-column label="标题" min-width="300" class-name="wt-title-col">
+          <template #default="{ row }">
+            <div :class="['wt-table-title-inner', row.parent_id ? 'wt-table-title-inner--child' : '']">
+              <!-- 展开/收起箭头 -->
+              <span 
+                v-if="row.children && row.children.length" 
+                class="custom-expand-icon"
+                @click.stop="toggleRowExpand(row)"
+              >
+                <el-icon :class="{ 'is-expanded': isRowExpanded(row) }"><CaretRight /></el-icon>
+              </span>
+              <span v-else class="custom-expand-placeholder"></span>
+              <span v-if="row.parent_id" class="wt-table-tree-branch" aria-hidden="true">
+                {{ tableChildBranchChar(row) }}
+              </span>
+              <span v-if="row.parent_id" class="wt-child-marker">子</span>
+              <el-icon class="wt-title-icon"><Memo /></el-icon>
+              <span
+                :class="(row.children && row.children.length) ? 'wt-title-parent' : 'wt-title-child'"
+                @click="handleEdit(row)"
+              >{{ row.title }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="项目" min-width="120" align="center">
+          <template #default="{ row }">{{ row.project?.name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="迭代" min-width="120" align="center">
+          <template #default="{ row }">{{ row.sprint?.name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="优先级" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="priorityTagType(row.priority)" size="small">{{ priorityLabel(row.priority) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="处理人" width="100" align="center">
+          <template #default="{ row }">{{ row.assignee?.display_name || row.assignee?.username || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="创建人" width="100" align="center">
+          <template #default="{ row }">{{ row.creator?.display_name || row.creator?.username || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="截止日期" width="110" align="center">
+          <template #default="{ row }">{{ row.due_date || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="130" fixed="right" align="center">
+          <template #default="{ row }">
+            <div class="table-actions">
+              <el-button link type="primary" size="small" @click="handleEdit(row)">
+                <el-icon><EditPen /></el-icon>编辑
+              </el-button>
+              <el-button link type="danger" size="small" @click="handleDelete(row)">
+                <el-icon><Delete /></el-icon>删除
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div style="margin-top: 16px; text-align: right;">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="prev, pager, next, sizes, jumper, ->, total"
+          :total="total"
+          @current-change="loadData"
+          @size-change="onPageSizeChange"
+        />
+      </div>
+    </el-card>
+
+    <!-- 新建/编辑任务抽屉 -->
+    <el-drawer
+      v-model="dialogVisible"
+      :title="editingId ? '编辑任务' : '新建任务'"
+      size="80%"
+      class="task-drawer"
+      :close-on-click-modal="true"
+    >
+      <div class="task-drawer-layout">
+        <div class="task-main">
+          <div class="task-main-scroll">
+            <el-form :model="formData" label-position="top">
+              <el-form-item label="标题" required>
+                <el-input v-model="formData.title" placeholder="请输入任务标题" />
+              </el-form-item>
+              <el-form-item label="内容">
+                <el-input
+                  v-model="formData.content"
+                  type="textarea"
+                  :rows="10"
+                  placeholder="请输入任务内容"
+                />
+              </el-form-item>
+            </el-form>
+
+            <template v-if="editingId">
+              <el-divider style="margin: 12px 0" />
+              <div class="wt-children-section">
+                <div class="wt-children-header">
+                  <span class="wt-children-title">子任务</span>
+                  <span
+                    class="wt-add-child-link"
+                    v-if="!showQuickCreate"
+                    @click="showQuickCreate = true"
+                  >
+                    <el-icon><Plus /></el-icon>
+                  </span>
+                  <span class="wt-children-progress" v-if="editingChildren.length > 0">
+                    {{ completedChildCount }}/{{ editingChildren.length }} 已完成
+                  </span>
+                </div>
+
+                <div v-if="editingChildren.length > 0" class="wt-children-list-wrapper">
+                  <div class="wt-children-list">
+                    <div
+                      v-for="(child, childIdx) in editingChildren"
+                      :key="child.id"
+                      class="wt-child-item"
+                    >
+                      <div class="wt-child-main" @click="openChildEdit(child)">
+                        <span class="wt-child-tree-branch" aria-hidden="true">
+                          {{ childIdx === editingChildren.length - 1 ? '└' : '├' }}
+                        </span>
+                        <span class="wt-drawer-child-marker">子</span>
+                        <el-icon class="wt-child-icon"><Memo /></el-icon>
+                        <span class="wt-child-id">#{{ child.id }}</span>
+                        <span class="wt-child-title">{{ child.title }}</span>
+                        <span v-if="child.due_date" class="wt-child-due">{{ child.due_date }} 截止</span>
+                        <el-tag :type="priorityTagType(child.priority)" size="small" class="wt-child-tag">
+                          {{ priorityLabel(child.priority) }}
+                        </el-tag>
+                        <el-tag :type="statusTagType(child.status)" size="small" class="wt-child-tag">
+                          {{ statusLabel(child.status) }}
+                        </el-tag>
+                      </div>
+                      <div class="wt-child-actions">
+                        <el-button link size="small" @click.stop="deleteChildById(child.id, child.title)">
+                          删除
+                        </el-button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="showQuickCreate" class="wt-quick-create-row">
+                  <span class="wt-child-tree-branch wt-child-tree-branch--continue" aria-hidden="true">├</span>
+                  <span class="wt-drawer-child-marker wt-drawer-child-marker--ghost">子</span>
+                  <el-icon class="wt-child-icon"><Memo /></el-icon>
+                  <el-input
+                    v-model="quickCreateTitle"
+                    placeholder="输入标题快速创建子任务"
+                    size="small"
+                    style="flex: 1"
+                    @keyup.enter="quickCreateChild"
+                    ref="quickCreateInputRef"
+                  />
+                  <el-button type="primary" size="small" :loading="quickCreating" @click="quickCreateChild">创建</el-button>
+                  <el-button size="small" @click="showQuickCreate = false; quickCreateTitle = ''">取消</el-button>
+                </div>
+                <div v-else-if="editingChildren.length === 0" class="wt-children-empty">
+                  暂无子任务，点击 <el-icon style="vertical-align: middle"><Plus /></el-icon> 添加
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div class="task-side">
+          <div class="task-side-title">基本信息</div>
+          <el-form :model="formData" label-position="top">
+            <el-form-item label="项目" required>
+              <el-select
+                v-model="formData.project_id"
+                placeholder="选择项目"
+                filterable
+                style="width: 100%"
+                :disabled="hasProjectSelected || !!editingId"
+                :style="{ opacity: (hasProjectSelected || !!editingId) ? 0.6 : 1 }"
+                @change="onProjectChange"
+              >
+                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="迭代">
+              <el-select v-model="formData.sprint_id" placeholder="选择迭代" filterable clearable style="width: 100%">
+                <el-option v-for="s in filteredSprints" :key="s.id" :label="s.name" :value="s.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="处理人">
+              <el-select v-model="formData.assignee_id" placeholder="选择处理人" filterable clearable style="width: 100%">
+                <el-option v-for="u in users" :key="u.id" :label="u.display_name || u.username" :value="u.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="优先级">
+              <el-select v-model="formData.priority" style="width: 100%">
+                <el-option v-for="p in priorityOptions" :key="p.value" :label="p.label" :value="p.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="开始日期">
+              <el-date-picker v-model="formData.start_date" type="date" placeholder="选择开始日期"
+                style="width: 100%" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
+            </el-form-item>
+            <el-form-item label="截止日期">
+              <el-date-picker v-model="formData.due_date" type="date" placeholder="选择截止日期"
+                style="width: 100%" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
+            </el-form-item>
+            <el-form-item v-if="editingId" label="状态">
+              <el-select v-model="formData.status" style="width: 100%">
+                <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+      </template>
+    </el-drawer>
+
+    <!-- 子任务编辑抽屉 -->
+    <el-drawer
+      v-model="childDrawerVisible"
+      title="编辑子任务"
+      size="60%"
+      class="task-drawer child-task-drawer"
+      :close-on-click-modal="true"
+      @closed="childEditingId = undefined"
+    >
+      <div class="task-drawer-layout child-task-layout">
+        <div class="task-main">
+          <div class="task-main-scroll">
+            <el-form :model="childFormData" label-position="top">
+              <el-form-item label="标题" required>
+                <el-input v-model="childFormData.title" placeholder="请输入子任务标题" />
+              </el-form-item>
+              <el-form-item label="内容">
+                <el-input
+                  v-model="childFormData.content"
+                  type="textarea"
+                  :rows="10"
+                  placeholder="请输入子任务内容"
+                />
+              </el-form-item>
+            </el-form>
+          </div>
+        </div>
+
+        <div class="task-side child-task-side">
+          <div class="task-side-title">基本信息</div>
+          <el-form :model="childFormData" label-position="top">
+            <el-form-item label="项目" required>
+              <el-select
+                v-model="childFormData.project_id"
+                placeholder="选择项目"
+                filterable
+                style="width: 100%"
+                :disabled="hasProjectSelected || !!childEditingId"
+                :style="{ opacity: (hasProjectSelected || !!childEditingId) ? 0.6 : 1 }"
+                @change="onChildProjectChange"
+              >
+                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="迭代">
+              <el-select v-model="childFormData.sprint_id" placeholder="选择迭代" filterable clearable style="width: 100%">
+                <el-option v-for="s in childFilteredSprints" :key="s.id" :label="s.name" :value="s.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="处理人">
+              <el-select v-model="childFormData.assignee_id" placeholder="选择处理人" filterable clearable style="width: 100%">
+                <el-option v-for="u in users" :key="u.id" :label="u.display_name || u.username" :value="u.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="优先级">
+              <el-select v-model="childFormData.priority" style="width: 100%">
+                <el-option v-for="p in priorityOptions" :key="p.value" :label="p.label" :value="p.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="开始日期">
+              <el-date-picker v-model="childFormData.start_date" type="date" placeholder="选择开始日期"
+                style="width: 100%" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
+            </el-form-item>
+            <el-form-item label="截止日期">
+              <el-date-picker v-model="childFormData.due_date" type="date" placeholder="选择截止日期"
+                style="width: 100%" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="childFormData.status" style="width: 100%">
+                <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="childDrawerVisible = false">取消</el-button>
+        <el-button type="primary" :loading="childSaving" @click="saveChild">保存</el-button>
+      </template>
+    </el-drawer>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Search, EditPen, Delete, Memo, CaretRight } from '@element-plus/icons-vue'
+import * as taskApi from '../api/worktasks'
+import * as projectApi from '../api/projects'
+import * as sprintApi from '../api/sprints'
+import * as userApi from '../api/users'
+import type { WorkTask, WorkTaskChild } from '../api/worktasks'
+import { useProjectContext } from '../composables/useProjectContext'
+
+const { getCurrentProjectId, getCurrentProjectName, hasProjectSelected, onProjectChanged, ensureInitialized } = useProjectContext()
+
+const items = ref<WorkTask[]>([])
+const total = ref(0)
+const loading = ref(false)
+const saving = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(20)
+
+// ── 表格展开/收起控制 ────────────────────────
+const tableRef = ref()
+const expandedRows = ref<Set<number>>(new Set())
+
+const toggleRowExpand = (row: any) => {
+  if (expandedRows.value.has(row.id)) {
+    expandedRows.value.delete(row.id)
+  } else {
+    expandedRows.value.add(row.id)
+  }
+  if (tableRef.value) {
+    tableRef.value.toggleRowExpansion(row)
+  }
+}
+
+const isRowExpanded = (row: any) => {
+  return expandedRows.value.has(row.id)
+}
+
+const projects = ref<any[]>([])
+const sprints = ref<any[]>([])
+const users = ref<any[]>([])
+const searchProjectId = ref<number | undefined>()
+const searchSprintId = ref<number | undefined>()
+const searchStatus = ref('')
+const searchPriority = ref('')
+const searchKeyword = ref('')
+const dialogVisible = ref(false)
+const editingId = ref<number | undefined>()
+const editingChildren = ref<WorkTaskChild[]>([])
+
+const showQuickCreate = ref(false)
+const quickCreateTitle = ref('')
+const quickCreating = ref(false)
+const quickCreateInputRef = ref()
+
+const childDrawerVisible = ref(false)
+const childSaving = ref(false)
+const childEditingId = ref<number | undefined>()
+const childFormData = reactive({
+  project_id: undefined as number | undefined,
+  title: '',
+  content: '',
+  priority: 'medium',
+  status: 'not_started',
+  assignee_id: null as number | null,
+  sprint_id: null as number | null,
+  start_date: null as string | null,
+  due_date: null as string | null,
+})
+
+const formData = reactive({
+  project_id: undefined as number | undefined,
+  sprint_id: null as number | null,
+  title: '',
+  content: '',
+  priority: 'medium',
+  status: 'not_started',
+  assignee_id: null as number | null,
+  start_date: null as string | null,
+  due_date: null as string | null,
+})
+
+const priorityOptions = [
+  { value: 'urgent', label: '紧急' },
+  { value: 'high', label: '高' },
+  { value: 'medium', label: '中' },
+  { value: 'low', label: '低' },
+]
+
+const statusOptions = [
+  { value: 'not_started', label: '未开始' },
+  { value: 'in_progress', label: '处理中' },
+  { value: 'completed', label: '已完成' },
+]
+
+const priorityLabel = (v: string) => priorityOptions.find(p => p.value === v)?.label ?? v
+const statusLabel = (v: string) => statusOptions.find(s => s.value === v)?.label ?? v
+
+const priorityTagType = (v: string) => {
+  const map: Record<string, string> = { urgent: 'danger', high: 'warning', medium: '', low: 'info' }
+  return map[v] ?? ''
+}
+const statusTagType = (v: string) => {
+  const map: Record<string, string> = { not_started: 'info', in_progress: 'primary', completed: 'success' }
+  return map[v] ?? ''
+}
+
+function tableChildBranchChar(row: { id: number; parent_id?: number | null }) {
+  if (row.parent_id == null) return ''
+  for (const p of items.value) {
+    const ch = p.children ?? []
+    const idx = ch.findIndex(c => c.id === row.id)
+    if (idx >= 0) return idx === ch.length - 1 ? '└' : '├'
+  }
+  return '└'
+}
+
+const completedChildCount = computed(() =>
+  editingChildren.value.filter(c => c.status === 'completed').length
+)
+
+const filteredSprints = computed(() => {
+  if (!formData.project_id) return sprints.value
+  return sprints.value.filter((s: any) => s.project_id === formData.project_id)
+})
+
+const childFilteredSprints = computed(() => {
+  if (!childFormData.project_id) return sprints.value
+  return sprints.value.filter((s: any) => s.project_id === childFormData.project_id)
+})
+
+const onProjectChange = () => {
+  formData.sprint_id = null
+}
+
+const onChildProjectChange = () => {
+  childFormData.sprint_id = null
+}
+
+const onPageSizeChange = () => {
+  currentPage.value = 1
+  loadData()
+}
+
+const loadData = async () => {
+  if (!isMounted) return
+  loading.value = true
+  try {
+    const params: any = { page: currentPage.value, page_size: pageSize.value }
+    if (hasProjectSelected.value && getCurrentProjectId.value) {
+      params.project_id = getCurrentProjectId.value
+      searchProjectId.value = getCurrentProjectId.value
+    } else if (searchProjectId.value) {
+      params.project_id = searchProjectId.value
+    }
+    if (searchSprintId.value) params.sprint_id = searchSprintId.value
+    if (searchStatus.value) params.status = searchStatus.value
+    if (searchPriority.value) params.priority = searchPriority.value
+    if (searchKeyword.value) params.keyword = searchKeyword.value
+    const res = await taskApi.getWorkTasks(params)
+    items.value = res.items
+    total.value = res.total
+  } catch {
+    if (isMounted) ElMessage.error('加载任务失败')
+  } finally {
+    if (isMounted) loading.value = false
+  }
+}
+
+const handleSearch = () => {
+  currentPage.value = 1
+  loadData()
+}
+
+const handleReset = () => {
+  searchKeyword.value = ''
+  searchSprintId.value = undefined
+  searchStatus.value = ''
+  searchPriority.value = ''
+  if (!hasProjectSelected.value) searchProjectId.value = undefined
+  currentPage.value = 1
+  loadData()
+}
+
+const handleCreate = () => {
+  editingId.value = undefined
+  editingChildren.value = []
+  showQuickCreate.value = false
+  quickCreateTitle.value = ''
+  Object.assign(formData, {
+    project_id: hasProjectSelected.value ? getCurrentProjectId.value : undefined,
+    sprint_id: null,
+    title: '',
+    content: '',
+    priority: 'medium',
+    status: 'not_started',
+    assignee_id: null,
+    start_date: null,
+    due_date: null,
+  })
+  dialogVisible.value = true
+}
+
+const handleEdit = (row: WorkTask) => {
+  editingId.value = row.id
+  editingChildren.value = [...(row.children ?? [])]
+  showQuickCreate.value = false
+  quickCreateTitle.value = ''
+  Object.assign(formData, {
+    project_id: row.project_id,
+    sprint_id: row.sprint_id ?? null,
+    title: row.title,
+    content: row.content ?? '',
+    priority: row.priority,
+    status: row.status,
+    assignee_id: row.assignee_id ?? null,
+    start_date: row.start_date ?? null,
+    due_date: row.due_date ?? null,
+  })
+  dialogVisible.value = true
+}
+
+const handleSave = async () => {
+  if (!formData.project_id || !formData.title) {
+    ElMessage.warning('请填写必填项：项目和标题')
+    return
+  }
+  saving.value = true
+  try {
+    if (editingId.value) {
+      await taskApi.updateWorkTask(editingId.value, formData)
+      ElMessage.success('更新成功')
+    } else {
+      await taskApi.createWorkTask(formData as any)
+      ElMessage.success('创建成功')
+    }
+    dialogVisible.value = false
+    loadData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+const handleDelete = async (row: WorkTask) => {
+  const hasChildren = (row.children ?? []).length > 0
+  const tip = hasChildren
+    ? `任务「${row.title}」含 ${row.children!.length} 个子任务，删除后子任务将变为顶级任务，确定删除吗？`
+    : `确定删除任务「${row.title}」吗？`
+  try {
+    await ElMessageBox.confirm(tip, '提示', { type: 'warning' })
+    await taskApi.deleteWorkTask(row.id)
+    ElMessage.success('删除成功')
+    loadData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || '删除失败')
+  }
+}
+
+const quickCreateChild = async () => {
+  if (!quickCreateTitle.value.trim()) {
+    ElMessage.warning('请输入标题')
+    return
+  }
+  if (!editingId.value) return
+  quickCreating.value = true
+  try {
+    const parentItem = items.value.find(r => r.id === editingId.value)
+    const projectId = formData.project_id ?? parentItem?.project_id
+    if (!projectId) {
+      ElMessage.warning('未能确定所属项目')
+      return
+    }
+    const child = await taskApi.createWorkTask({
+      project_id: projectId,
+      title: quickCreateTitle.value.trim(),
+      priority: 'medium',
+      status: 'not_started',
+      parent_id: editingId.value,
+    })
+    editingChildren.value.push(child as any)
+    quickCreateTitle.value = ''
+    showQuickCreate.value = false
+    loadData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '创建失败')
+  } finally {
+    quickCreating.value = false
+  }
+}
+
+watch(showQuickCreate, (val) => {
+  if (val) nextTick(() => quickCreateInputRef.value?.focus())
+})
+
+const openChildEdit = async (child: WorkTaskChild) => {
+  childEditingId.value = child.id
+  try {
+    const full = await taskApi.getWorkTask(child.id)
+    Object.assign(childFormData, {
+      project_id: full.project_id,
+      title: full.title,
+      content: full.content ?? '',
+      priority: full.priority,
+      status: full.status,
+      assignee_id: full.assignee_id ?? null,
+      sprint_id: full.sprint_id ?? null,
+      start_date: full.start_date ?? null,
+      due_date: full.due_date ?? null,
+    })
+  } catch {
+    Object.assign(childFormData, {
+      project_id: (child as any).project_id ?? formData.project_id ?? childFormData.project_id,
+      title: child.title,
+      content: (child as any).content ?? '',
+      priority: child.priority,
+      status: child.status,
+      assignee_id: child.assignee_id ?? null,
+      sprint_id: (child as any).sprint_id ?? null,
+      start_date: (child as any).start_date ?? null,
+      due_date: child.due_date ?? null,
+    })
+  }
+  childDrawerVisible.value = true
+}
+
+const saveChild = async () => {
+  if (!childFormData.title) {
+    ElMessage.warning('请填写标题')
+    return
+  }
+  if (!childEditingId.value) return
+  childSaving.value = true
+  try {
+    const updated = await taskApi.updateWorkTask(childEditingId.value, childFormData)
+    const idx = editingChildren.value.findIndex(c => c.id === childEditingId.value)
+    if (idx >= 0) {
+      editingChildren.value[idx] = {
+        ...editingChildren.value[idx],
+        title: updated.title,
+        priority: updated.priority,
+        status: updated.status,
+        due_date: updated.due_date ?? null,
+        assignee_id: updated.assignee_id ?? null,
+        assignee: updated.assignee,
+      } as any
+    }
+    ElMessage.success('保存成功')
+    childDrawerVisible.value = false
+    loadData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } finally {
+    childSaving.value = false
+  }
+}
+
+const deleteChildById = async (childId: number, title: string) => {
+  try {
+    await ElMessageBox.confirm(`确定删除子任务「${title}」吗？`, '提示', { type: 'warning' })
+    await taskApi.deleteWorkTask(childId)
+    editingChildren.value = editingChildren.value.filter(c => c.id !== childId)
+    ElMessage.success('删除成功')
+    loadData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || '删除失败')
+  }
+}
+
+let cleanupProjectChanged: (() => void) | null = null
+let isMounted = false
+
+onMounted(async () => {
+  isMounted = true
+  await ensureInitialized()
+  if (hasProjectSelected.value && getCurrentProjectId.value) {
+    searchProjectId.value = getCurrentProjectId.value
+  }
+  try {
+    projects.value = (await projectApi.getProjects({ page_size: 1000 })).items
+  } catch {}
+  try {
+    const pid = getCurrentProjectId.value
+    sprints.value = (await sprintApi.getSprints({ project_id: pid ?? undefined, page_size: 1000 })).items
+  } catch {}
+  try {
+    users.value = (await userApi.getUsers({ status: 'active', page_size: 1000 })).items
+  } catch {}
+  loadData()
+  cleanupProjectChanged = onProjectChanged(() => {
+    if (!isMounted) return
+    if (hasProjectSelected.value && getCurrentProjectId.value) {
+      searchProjectId.value = getCurrentProjectId.value
+    } else {
+      searchProjectId.value = undefined
+    }
+    currentPage.value = 1
+    loadData()
+  })
+})
+
+onUnmounted(() => {
+  isMounted = false
+  cleanupProjectChanged?.()
+})
+
+watch(() => getCurrentProjectId.value, (newVal, oldVal) => {
+  if (newVal === oldVal) return
+  if (hasProjectSelected.value && getCurrentProjectId.value) {
+    searchProjectId.value = getCurrentProjectId.value
+  } else {
+    searchProjectId.value = undefined
+  }
+  currentPage.value = 1
+  loadData()
+})
+</script>
+
+<style scoped>
+.worktasks-page {
+  animation: fadeIn 0.4s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.filter-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.current-project-tag {
+  font-size: 14px;
+  font-weight: 500;
+  color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  padding: 4px 12px;
+  border-radius: 16px;
+  margin-left: 8px;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.table-card {
+  margin-top: 16px;
+}
+
+.table-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+:deep(.el-table th.el-table__cell) {
+  white-space: nowrap;
+}
+
+:deep(.el-table__body td) {
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+:deep(.wt-tree-table td.wt-title-col .cell) {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  line-height: 1.4;
+}
+
+.wt-table-title-inner {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 隐藏编号列的默认展开箭头和缩进 */
+:deep(.hide-expand .cell) {
+  padding-left: 12px !important;
+}
+:deep(.el-table__expand-icon) {
+  display: none !important;
+}
+/* 移除树形缩进，让编号列对齐 */
+:deep(.el-table__indent) {
+  display: none !important;
+}
+:deep(.el-table__placeholder) {
+  display: none !important;
+}
+
+/* 自定义展开箭头 */
+.custom-expand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  color: #909399;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.custom-expand-icon:hover {
+  color: #667eea;
+}
+.custom-expand-icon .el-icon {
+  transition: transform 0.2s ease;
+}
+.custom-expand-icon .el-icon.is-expanded {
+  transform: rotate(90deg);
+}
+.custom-expand-placeholder {
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.wt-table-title-inner--child {
+  margin-left: 4px;
+}
+
+.wt-table-tree-branch {
+  flex-shrink: 0;
+  width: 1.1em;
+  text-align: center;
+  color: #b1b5bd;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+}
+
+.wt-child-marker {
+  display: inline-block;
+  font-size: 11px;
+  color: #909399;
+  background: #f0f2f5;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 2px;
+  vertical-align: middle;
+}
+
+.wt-title-icon {
+  color: #409eff;
+  font-size: 16px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.wt-title-parent,
+.wt-title-child {
+  cursor: pointer;
+  color: #303133;
+}
+
+.wt-title-parent:hover,
+.wt-title-child:hover {
+  color: #303133;
+  text-decoration: underline;
+}
+
+:deep(.task-drawer .el-drawer__body) {
+  padding: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-drawer-layout {
+  flex: 1;
+  display: flex;
+  padding: 12px 20px 0 20px;
+  gap: 16px;
+  min-height: 0;
+}
+
+.child-task-layout .task-side {
+  width: 260px;
+}
+
+.task-main {
+  flex: 3;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-main-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 12px;
+}
+
+.task-side {
+  width: 320px;
+  flex-shrink: 0;
+  border-left: 1px solid #ebeef5;
+  padding-left: 16px;
+  overflow-y: auto;
+}
+
+.task-side-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
+}
+
+/* 抽屉内子任务列表 */
+.wt-children-section {
+  margin-bottom: 8px;
+}
+
+.wt-children-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.wt-children-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wt-children-progress {
+  margin-left: auto;
+  font-size: 12px;
+  color: #909399;
+  font-weight: normal;
+}
+
+.wt-add-child-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #409eff;
+  margin-left: 8px;
+}
+
+.wt-add-child-link:hover {
+  color: #66b1ff;
+}
+
+.wt-children-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wt-child-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: background 0.15s;
+  font-size: 13px;
+}
+
+.wt-child-item:hover {
+  background: #f5f7fa;
+}
+
+.wt-children-list-wrapper {
+  border: 1px solid #ebeef5;
+  border-left: none;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-left: 28px;
+  background-color: #fafafa;
+}
+
+.wt-child-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  padding-left: 2px;
+}
+
+.wt-child-tree-branch {
+  flex-shrink: 0;
+  width: 1.1em;
+  text-align: center;
+  color: #b1b5bd;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+  margin-right: 2px;
+}
+
+.wt-child-tree-branch--continue {
+  color: #a8abb2;
+}
+
+.wt-drawer-child-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #909399;
+  background: #f0f2f5;
+  padding: 1px 5px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.wt-drawer-child-marker--ghost {
+  opacity: 0.65;
+}
+
+.wt-child-icon {
+  color: #409eff;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.wt-child-id {
+  color: #909399;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.wt-child-title {
+  flex: 1;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wt-child-due {
+  font-size: 12px;
+  color: #e6a23c;
+  background: #fdf6ec;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  min-width: 120px;
+  text-align: center;
+}
+
+.wt-child-tag {
+  flex-shrink: 0;
+  min-width: 72px;
+  text-align: center;
+}
+
+.wt-child-actions :deep(.el-button) {
+  background-color: transparent !important;
+  border: none !important;
+  padding: 0 4px;
+  box-shadow: none !important;
+  color: #f56c6c;
+}
+
+.wt-child-actions :deep(.el-button:hover) {
+  color: #f78989;
+  background-color: transparent;
+}
+
+.wt-quick-create-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-left: 28px;
+  border-radius: 6px;
+  border: 1px solid #dcdfe6;
+  margin-top: 8px;
+  background: #fafafa;
+}
+
+.wt-children-empty {
+  font-size: 13px;
+  color: #c0c4cc;
+  padding: 8px 10px;
+  margin-left: 28px;
+}
+</style>
