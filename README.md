@@ -1,6 +1,8 @@
 # 质量管理系统
 
 基于 Vue3 + Element Plus + FastAPI + MySQL 8 的质量与缺陷管理平台（界面品牌为「质量管理系统」），涵盖项目管理、缺陷跟踪、API 测试、测试用例与模型配置等能力。
+<img width="3838" height="1726" alt="image" src="https://github.com/user-attachments/assets/125e48b7-4bc9-4eb1-a85a-b92242833594" />
+
 
 ## 功能特性
 
